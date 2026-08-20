@@ -82,8 +82,13 @@ def process_wanted_item(
 
 
 def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings) -> int:
+    # NOT_FOUND is retried alongside WANTED, not just skipped forever: Soulseek
+    # is a live P2P network, so "no matching files" from one search is often
+    # just whichever peers happened to be online at that moment, not proof the
+    # content isn't out there. FAILED (a real error, e.g. slskd unreachable)
+    # and anything already downloading/done are left alone.
     items = session.exec(
-        select(WantedItem).where(WantedItem.status == WantedStatus.WANTED)
+        select(WantedItem).where(WantedItem.status.in_([WantedStatus.WANTED, WantedStatus.NOT_FOUND]))
     ).all()
     for item in items:
         process_wanted_item(session, item, slskd, settings)

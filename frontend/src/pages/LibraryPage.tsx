@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, LibraryAlbumOut } from "../api/client";
-
-let libraryCache: LibraryAlbumOut[] | null = null;
+import { libraryStore } from "../libraryStore";
 
 interface ArtistSummary {
   artist: string;
@@ -32,7 +32,7 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
   const showImage = artist.thumb && !imgFailed;
 
   return (
-    <div className="artist-card">
+    <Link className="artist-card" to={`/library/${encodeURIComponent(artist.artist)}`}>
       {showImage ? (
         <img
           src={api.plexImageUrl(artist.thumb!)}
@@ -46,15 +46,16 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
       <div className="artist-card-label">
         <div className="artist-card-name">{artist.artist}</div>
         <div className="artist-card-meta">
-          {artist.trackCount} track{artist.trackCount === 1 ? "" : "s"}
+          {artist.albumCount} album{artist.albumCount === 1 ? "" : "s"} · {artist.trackCount} track
+          {artist.trackCount === 1 ? "" : "s"}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
 export default function LibraryPage() {
-  const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryCache);
+  const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export default function LibraryPage() {
     setError(null);
     try {
       const data = await api.getLibrary();
-      libraryCache = data;
+      libraryStore.albums = data;
       setAlbums(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -74,7 +75,7 @@ export default function LibraryPage() {
   }
 
   useEffect(() => {
-    if (libraryCache === null) {
+    if (libraryStore.albums === null) {
       load();
     }
   }, []);

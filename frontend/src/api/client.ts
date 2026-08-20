@@ -60,6 +60,7 @@ export interface LibraryAlbumOut {
   artist: string;
   artist_thumb: string | null;
   album: string;
+  thumb: string | null;
   year: number | null;
   track_count: number | null;
 }

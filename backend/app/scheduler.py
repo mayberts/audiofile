@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import logging
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from sqlmodel import Session, select
+
+from .clients.musicbrainz import MusicBrainzClient
+from .clients.slskd import SlskdClient
+from .config import get_settings
+from .database import engine
+from .models import DownloadRecord, DownloadStatus
+from .services import downloads as downloads_service
+from .services import wanted as wanted_service
+
+logger = logging.getLogger(__name__)
+
+_scheduler: BackgroundScheduler | None = None
+
+
+def poll_downloads_job() -> None:
+    settings = get_settings()
+    slskd = SlskdClient(settings)
+    mb = MusicBrainzClient(settings)
+    try:
+        with Session(engine) as session:
+            downloads_service.sync_transfer_status(session, slskd)
+
+            completed = session.exec(
+                select(DownloadRecord).where(DownloadRecord.status == DownloadStatus.COMPLETED)
+            ).all()
+            for record in completed:
+                downloads_service.process_completed_download(session, record, settings, mb)
+    except Exception:  # noqa: BLE001
+        logger.exception("poll_downloads_job failed")
+    finally:
+        slskd.close()
+        mb.close()
+
+
+def process_wanted_job() -> None:
+    settings = get_settings()
+    slskd = SlskdClient(settings)
+    try:
+        with Session(engine) as session:
+            count = wanted_service.process_all_wanted(session, slskd, settings)
+            if count:
+                logger.info("processed %s wanted item(s)", count)
+    except Exception:  # noqa: BLE001
+        logger.exception("process_wanted_job failed")
+    finally:
+        slskd.close()
+
+
+def start_scheduler() -> BackgroundScheduler:
+    global _scheduler
+    if _scheduler is not None:
+        return _scheduler
+
+    settings = get_settings()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        poll_downloads_job,
+        "interval",
+        seconds=settings.download_poll_interval_seconds,
+        id="poll_downloads",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        process_wanted_job,
+        "interval",
+        minutes=settings.wanted_scan_interval_minutes,
+        id="process_wanted",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
+    _scheduler = scheduler
+    return scheduler
+
+
+def stop_scheduler() -> None:
+    global _scheduler
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None

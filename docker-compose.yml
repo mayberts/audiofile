@@ -1,0 +1,54 @@
+services:
+  slskd:
+    image: slskd/slskd:latest
+    container_name: audiofile-slskd
+    restart: unless-stopped
+    environment:
+      SLSKD_SLSK_USERNAME: ${SOULSEEK_USERNAME}
+      SLSKD_SLSK_PASSWORD: ${SOULSEEK_PASSWORD}
+      SLSKD_API_KEY: ${SLSKD_API_KEY}
+      SLSKD_NO_HTTPS: "true"
+    ports:
+      - "5030:5030" # slskd web UI (useful for debugging searches directly)
+      - "50300:50300" # Soulseek peer-to-peer listen port
+    volumes:
+      - slskd_data:/app/data
+      - downloads:/app/downloads
+      - incomplete:/app/incomplete
+
+  backend:
+    build: ./backend
+    container_name: audiofile-backend
+    restart: unless-stopped
+    depends_on:
+      - slskd
+    environment:
+      SLSKD_URL: http://slskd:5030
+      SLSKD_API_KEY: ${SLSKD_API_KEY}
+      PLEX_URL: ${PLEX_URL}
+      PLEX_TOKEN: ${PLEX_TOKEN}
+      MUSICBRAINZ_CONTACT: ${MUSICBRAINZ_CONTACT}
+      DOWNLOAD_DIR: /downloads
+      LIBRARY_DIR: /music
+      DATABASE_URL: sqlite:////data/audiofile.db
+    volumes:
+      - downloads:/downloads
+      - ${HOST_LIBRARY_DIR:-./data/music}:/music
+      - backend_data:/data
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: audiofile-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  slskd_data:
+  downloads:
+  incomplete:
+  backend_data:

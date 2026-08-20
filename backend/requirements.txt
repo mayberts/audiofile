@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+sqlmodel==0.0.22
+httpx==0.27.2
+mutagen==1.47.0
+APScheduler==3.10.4
+PlexAPI==4.16.1
+python-multipart==0.0.12
+pydantic-settings==2.5.2

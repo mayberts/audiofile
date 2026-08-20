@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, LibraryAlbumOut, TrackOut } from "../api/client";
+import { api, LibraryAlbumOut, MissingTrackOut, TrackCheckOut, TrackOut } from "../api/client";
 import { libraryStore } from "../libraryStore";
 
 function formatDuration(ms: number | null): string {
@@ -108,6 +108,112 @@ export default function AlbumDetailPage() {
           </table>
         </div>
       )}
+
+      {albumEntry && tracks && tracks.length > 0 && (
+        <MissingTracksPanel artist={artistName} ratingKey={albumEntry.rating_key ?? ""} />
+      )}
+    </div>
+  );
+}
+
+function MissingTracksPanel({ artist, ratingKey }: { artist: string; ratingKey: string }) {
+  const [result, setResult] = useState<TrackCheckOut | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function check() {
+    setLoading(true);
+    setError(null);
+    api
+      .getTrackCheck(ratingKey)
+      .then(setResult)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
+  }
+
+  return (
+    <div style={{ marginTop: "1rem" }}>
+      {!result && !loading && (
+        <button className="secondary" onClick={check} disabled={!ratingKey}>
+          Check for Missing Tracks
+        </button>
+      )}
+      {loading && <div className="panel">Checking MusicBrainz...</div>}
+      {error && (
+        <div className="panel">
+          <p className="error-text" style={{ margin: 0 }}>
+            {error}
+          </p>
+          <button className="secondary" style={{ marginTop: "0.7rem" }} onClick={check}>
+            Try again
+          </button>
+        </div>
+      )}
+      {result && !result.checked && (
+        <div className="panel empty">Couldn't find this album on MusicBrainz to compare tracks.</div>
+      )}
+      {result && result.checked && result.missing_tracks.length === 0 && (
+        <div className="panel empty">
+          Nothing missing — all {result.expected_total} tracks MusicBrainz lists for this release are here.
+        </div>
+      )}
+      {result && result.checked && result.missing_tracks.length > 0 && (
+        <MissingTracksTable artist={artist} tracks={result.missing_tracks} />
+      )}
+    </div>
+  );
+}
+
+function MissingTracksTable({ artist, tracks }: { artist: string; tracks: MissingTrackOut[] }) {
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onAdd(track: MissingTrackOut) {
+    setPending(track.title);
+    setError(null);
+    try {
+      await api.createWanted({ artist, track: track.title });
+      setAdded((prev) => new Set(prev).add(track.title));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <h2>Missing Tracks</h2>
+      {error && <div className="error-text" style={{ marginBottom: "0.6rem" }}>{error}</div>}
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: "3rem" }}>#</th>
+            <th>Title</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...tracks]
+            .sort((a, b) => (a.track_number ?? 0) - (b.track_number ?? 0))
+            .map((t) => (
+              <tr key={t.title}>
+                <td className="muted">{t.track_number ?? "—"}</td>
+                <td>{t.title}</td>
+                <td>
+                  {added.has(t.title) ? (
+                    <span className="badge downloaded">In wanted list</span>
+                  ) : (
+                    <button className="secondary" onClick={() => onAdd(t)} disabled={pending === t.title}>
+                      {pending === t.title ? "..." : "Add to Wanted"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -108,6 +108,19 @@ class AddMissingAlbumRequest(BaseModel):
     release_group_mbid: Optional[str] = None
 
 
+class MissingTrackOut(BaseModel):
+    title: str
+    track_number: Optional[int] = None
+    disc: Optional[int] = None
+
+
+class TrackCheckOut(BaseModel):
+    checked: bool
+    expected_total: Optional[int] = None
+    owned_total: int
+    missing_tracks: list[MissingTrackOut] = []
+
+
 class TestSlskdRequest(BaseModel):
     url: str
     api_key: str = ""

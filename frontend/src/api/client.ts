@@ -79,6 +79,19 @@ export interface MissingAlbumOut {
   first_release_date: string | null;
 }
 
+export interface MissingTrackOut {
+  title: string;
+  track_number: number | null;
+  disc: number | null;
+}
+
+export interface TrackCheckOut {
+  checked: boolean;
+  expected_total: number | null;
+  owned_total: number;
+  missing_tracks: MissingTrackOut[];
+}
+
 export interface ConnectionTestResult {
   connected: boolean;
   detail: string | null;
@@ -151,6 +164,8 @@ export const api = {
 
   getMissingAlbums: (artistRatingKey: string) =>
     request<MissingAlbumOut[]>(`/api/plex/artist/${artistRatingKey}/missing-albums`),
+  getTrackCheck: (albumRatingKey: string) =>
+    request<TrackCheckOut>(`/api/plex/album/${albumRatingKey}/track-check`),
   addMissingAlbumToWanted: (params: { artist: string; album: string; release_group_mbid?: string | null }) =>
     request<WantedOut>("/api/plex/missing-album/add-to-wanted", {
       method: "POST",

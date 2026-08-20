@@ -11,8 +11,8 @@ from ..clients.plex import PlexNotConfigured, get_album_tracks, get_artist_bio, 
 from ..config import get_settings
 from ..database import get_session
 from ..models import LibraryAlbum, WantedItem, WantedSource
-from ..schemas import AddMissingAlbumRequest, LibraryAlbumOut, MissingAlbumOut, TrackOut, WantedOut
-from ..services.plex_gaps import get_missing_albums_for_artist
+from ..schemas import AddMissingAlbumRequest, LibraryAlbumOut, MissingAlbumOut, TrackCheckOut, TrackOut, WantedOut
+from ..services.plex_gaps import get_missing_albums_for_artist, get_missing_tracks_for_album
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,31 @@ def get_album_tracks_endpoint(rating_key: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not load tracks: {exc}") from exc
+
+
+@router.get("/album/{rating_key}/track-check", response_model=TrackCheckOut)
+def get_album_track_check(rating_key: str):
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        plex = get_plex_server(settings)
+        return get_missing_tracks_for_album(plex, mb, rating_key)
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Track check failed for album %s: %s", rating_key, exc)
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=503, detail="MusicBrainz is temporarily unavailable — try again in a moment."
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"MusicBrainz returned an error ({exc.response.status_code})."
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Track check failed for album %s", rating_key)
+        raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc
+    finally:
+        mb.close()
 
 
 @router.get("/image")

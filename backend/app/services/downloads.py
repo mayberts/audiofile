@@ -71,6 +71,12 @@ def resolve_track_metadata(record: DownloadRecord, mb: MusicBrainzClient) -> Tra
     if record.hint_album and record.hint_artist:
         release = mb.search_release(record.hint_artist, record.hint_album)
         if release:
+            # search_release only returns summary release info — no per-track
+            # listing — so a second lookup is needed to actually get tracks
+            # to match hint_track against and to fill in track_number below.
+            full_release = mb.get_release(release.release_mbid)
+            if full_release:
+                release = full_release
             matching_track = next(
                 (
                     t

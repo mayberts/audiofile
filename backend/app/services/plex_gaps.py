@@ -57,6 +57,39 @@ def _is_studio_album(rg: dict) -> bool:
     return not (secondary & SKIP_SECONDARY_TYPES)
 
 
+def get_missing_tracks_for_album(plex: PlexServer, mb: MusicBrainzClient, album_rating_key: str) -> dict:
+    """Compares the tracks Plex has for one album against MusicBrainz's
+    canonical tracklist for that release — checked live, on demand, for just
+    this one album (not a background scan), the same way missing-album
+    checks work per-artist."""
+    album = plex.fetchItem(int(album_rating_key))
+    owned_normalized = {_normalize_title(t.title) for t in album.tracks()}
+
+    release = mb.search_release(album.parentTitle, album.title)
+    if not release:
+        return {"checked": False, "expected_total": None, "owned_total": len(owned_normalized), "missing_tracks": []}
+
+    # search_release only returns summary release info — no per-track
+    # listing — so the actual tracklist needs a follow-up lookup.
+    full_release = mb.get_release(release.release_mbid)
+    if not full_release or not full_release.tracks:
+        return {"checked": False, "expected_total": None, "owned_total": len(owned_normalized), "missing_tracks": []}
+
+    missing = []
+    for t in full_release.tracks:
+        title = t.get("title") or ""
+        if _normalize_title(title) in owned_normalized:
+            continue
+        missing.append({"title": title, "track_number": t.get("position"), "disc": t.get("disc")})
+
+    return {
+        "checked": True,
+        "expected_total": len(full_release.tracks),
+        "owned_total": len(owned_normalized),
+        "missing_tracks": missing,
+    }
+
+
 def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artist_rating_key: str) -> list[dict]:
     """Studio albums MusicBrainz lists for this artist that aren't already
     in the Plex library — checked live, just for this one artist (two

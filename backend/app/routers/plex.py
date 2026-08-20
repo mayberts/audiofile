@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
-from ..clients.plex import PlexNotConfigured
+from ..clients.plex import PlexNotConfigured, get_plex_server
 from ..config import get_settings
 from ..database import get_session
 from ..models import PlexMissingAlbum, WantedItem, WantedSource
@@ -19,19 +19,39 @@ router = APIRouter(prefix="/api/plex", tags=["plex"])
 
 
 @router.post("/scan")
-def trigger_scan(limit_artists: int | None = None, session: Session = Depends(get_session)):
+def trigger_scan(background_tasks: BackgroundTasks, limit_artists: int | None = None):
     settings = get_settings()
-    mb = MusicBrainzClient(settings)
+
+    # Fail fast on bad config/connectivity — this check is quick, so it's
+    # worth doing synchronously rather than only surfacing it minutes later.
     try:
-        missing = scan_for_gaps(session, settings, mb, limit_artists=limit_artists)
+        get_plex_server(settings)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — surface the real cause instead of a bare 500
-        logger.exception("Plex gap scan failed")
-        raise HTTPException(status_code=502, detail=f"Plex gap scan failed: {exc}") from exc
-    finally:
-        mb.close()
-    return {"new_missing_albums": missing}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not reach Plex: {exc}") from exc
+
+    def _run():
+        from sqlmodel import Session as _Session
+
+        from ..database import engine
+
+        mb = MusicBrainzClient(settings)
+        try:
+            with _Session(engine) as session:
+                missing = scan_for_gaps(session, settings, mb, limit_artists=limit_artists)
+                logger.info("Plex gap scan finished: %d new missing album(s)", missing)
+        except Exception:  # noqa: BLE001
+            logger.exception("Plex gap scan failed")
+        finally:
+            mb.close()
+
+    # The scan itself can take minutes for a real library — MusicBrainz's
+    # ~1 req/sec rate limit means two requests per artist adds up fast — so
+    # it runs in the background instead of blocking the request past
+    # nginx's proxy timeout. Poll GET /api/plex/gaps for results.
+    background_tasks.add_task(_run)
+    return {"status": "scan started"}
 
 
 @router.get("/gaps", response_model=list[PlexGapOut])

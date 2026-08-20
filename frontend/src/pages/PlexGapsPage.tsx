@@ -18,6 +18,8 @@ export default function PlexGapsPage() {
 
   useEffect(() => {
     refresh();
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
   }, []);
 
   async function onScan() {
@@ -25,9 +27,11 @@ export default function PlexGapsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await api.scanPlexGaps();
-      setMessage(`Scan complete — found ${res.new_missing_albums} new missing album(s).`);
-      refresh();
+      await api.scanPlexGaps();
+      setMessage(
+        "Scan started in the background — MusicBrainz's rate limit means this can take several " +
+          "minutes for a large library. This page refreshes automatically as results come in.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

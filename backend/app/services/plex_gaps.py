@@ -71,5 +71,10 @@ def scan_for_gaps(session: Session, settings: Settings, mb: MusicBrainzClient, l
             )
             missing_count += 1
 
-    session.commit()
+        # Commit after each artist rather than once at the end — a full
+        # scan can take minutes, so this makes results show up on the Plex
+        # Gaps page progressively instead of all at once (or not at all if
+        # the process is interrupted mid-scan).
+        session.commit()
+
     return missing_count

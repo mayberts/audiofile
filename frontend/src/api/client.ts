@@ -129,7 +129,7 @@ export const api = {
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
 
   scanPlexGaps: (limitArtists?: number) =>
-    request<{ new_missing_albums: number }>(
+    request<{ status: string }>(
       `/api/plex/scan${limitArtists ? `?limit_artists=${limitArtists}` : ""}`,
       { method: "POST" },
     ),

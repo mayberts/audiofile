@@ -40,6 +40,12 @@ def process_wanted_item(
 
     results = search_service.parse_search_responses(raw)
     match = search_service.best_match(results, settings)
+    logger.info(
+        "wanted item %s: %d raw peer responses, %d audio-file results after parsing",
+        item.id,
+        len(raw),
+        len(results),
+    )
 
     if match is None:
         item.status = WantedStatus.NOT_FOUND

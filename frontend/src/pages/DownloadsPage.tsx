@@ -26,9 +26,23 @@ export default function DownloadsPage() {
     refresh();
   }
 
+  const hasCompleted = downloads.some((d) => ["done", "failed", "cancelled"].includes(d.status));
+
+  async function onClearCompleted() {
+    await api.clearCompletedDownloads();
+    refresh();
+  }
+
   return (
     <div>
-      <h1>Downloads</h1>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h1>Downloads</h1>
+        {hasCompleted && (
+          <button className="secondary" onClick={onClearCompleted}>
+            Clear Completed
+          </button>
+        )}
+      </div>
       {error && <div className="panel error-text">{error}</div>}
       <div className="panel">
         {downloads.length === 0 && <div className="empty">No downloads yet.</div>}

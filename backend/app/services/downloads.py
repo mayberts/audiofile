@@ -167,8 +167,12 @@ def _sync_wanted_item(session: Session, record: DownloadRecord) -> None:
     if wanted is None:
         return
     if record.status == DownloadStatus.DONE:
-        wanted.status = WantedStatus.DOWNLOADED
-        wanted.last_error = None
+        # Downloaded is a terminal, successful outcome for a wanted item —
+        # nothing left to search or retry for, so it comes off the list
+        # entirely rather than sitting there as a permanently-green row.
+        session.delete(wanted)
+        session.commit()
+        return
     elif record.status == DownloadStatus.FAILED:
         wanted.status = WantedStatus.FAILED
         wanted.last_error = record.error

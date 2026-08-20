@@ -18,6 +18,19 @@ def list_downloads(session: Session = Depends(get_session)):
     return records
 
 
+@router.delete("/completed")
+def clear_completed_downloads(session: Session = Depends(get_session)):
+    """Downloads are kept as history rather than auto-removed, so this is
+    the manual way to clear out finished (done/failed/cancelled) rows —
+    anything still queued, in progress, or tagging is left alone."""
+    terminal = [DownloadStatus.DONE, DownloadStatus.FAILED, DownloadStatus.CANCELLED]
+    records = session.exec(select(DownloadRecord).where(DownloadRecord.status.in_(terminal))).all()
+    for record in records:
+        session.delete(record)
+    session.commit()
+    return {"cleared": len(records)}
+
+
 @router.post("/{download_id}/cancel", response_model=DownloadOut)
 def cancel_download(download_id: int, session: Session = Depends(get_session)):
     record = session.get(DownloadRecord, download_id)

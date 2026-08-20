@@ -1,5 +1,6 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import DownloadsPage from "./pages/DownloadsPage";
+import LibraryPage from "./pages/LibraryPage";
 import PlexGapsPage from "./pages/PlexGapsPage";
 import SearchPage from "./pages/SearchPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -7,6 +8,7 @@ import WantedPage from "./pages/WantedPage";
 
 const links = [
   { to: "/", label: "Search", end: true },
+  { to: "/library", label: "Library" },
   { to: "/downloads", label: "Downloads" },
   { to: "/wanted", label: "Wanted" },
   { to: "/plex", label: "Plex Gaps" },
@@ -29,6 +31,7 @@ export default function App() {
       <main className="content">
         <Routes>
           <Route path="/" element={<SearchPage />} />
+          <Route path="/library" element={<LibraryPage />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/wanted" element={<WantedPage />} />
           <Route path="/plex" element={<PlexGapsPage />} />

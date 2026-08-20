@@ -6,16 +6,28 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
-from ..clients.plex import PlexNotConfigured, get_plex_server
+from ..clients.plex import PlexNotConfigured, get_library_albums, get_plex_server
 from ..config import get_settings
 from ..database import get_session
 from ..models import PlexMissingAlbum, WantedItem, WantedSource
-from ..schemas import PlexGapOut
+from ..schemas import LibraryAlbumOut, PlexGapOut
 from ..services.plex_gaps import scan_for_gaps
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/plex", tags=["plex"])
+
+
+@router.get("/library", response_model=list[LibraryAlbumOut])
+def get_library():
+    settings = get_settings()
+    try:
+        plex = get_plex_server(settings)
+        return get_library_albums(plex)
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not load Plex library: {exc}") from exc
 
 
 @router.post("/scan")

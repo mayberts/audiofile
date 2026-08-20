@@ -56,6 +56,13 @@ export interface WantedOut {
   last_error: string | null;
 }
 
+export interface LibraryAlbumOut {
+  artist: string;
+  album: string;
+  year: number | null;
+  track_count: number | null;
+}
+
 export interface PlexGapOut {
   id: number;
   artist: string;
@@ -127,6 +134,8 @@ export const api = {
   scanWantedNow: (id: number) =>
     request<WantedOut>(`/api/wanted/${id}/scan-now`, { method: "POST" }),
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
+
+  getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
 
   scanPlexGaps: (limitArtists?: number) =>
     request<{ status: string }>(

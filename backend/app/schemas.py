@@ -76,6 +76,13 @@ class WantedOut(BaseModel):
         from_attributes = True
 
 
+class LibraryAlbumOut(BaseModel):
+    artist: str
+    album: str
+    year: Optional[int] = None
+    track_count: Optional[int] = None
+
+
 class PlexGapOut(BaseModel):
     id: int
     artist: str

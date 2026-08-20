@@ -82,11 +82,19 @@ class MusicBrainzClient:
         self._cover_client.close()
 
     def _get(self, path: str, params: dict) -> dict:
-        _throttle()
         params = {**params, "fmt": "json"}
-        resp = self._client.get(path, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        attempts = 3
+        for attempt in range(attempts):
+            _throttle()
+            resp = self._client.get(path, params=params)
+            # MusicBrainz's own guidance is that clients should back off and
+            # retry on 503 — it's load-shedding, not a real client error.
+            if resp.status_code == 503 and attempt < attempts - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise AssertionError("unreachable")  # loop always returns or raises above
 
     def search_release(self, artist: str, album: str) -> Optional[ReleaseMatch]:
         query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(album)}"'
@@ -159,9 +167,12 @@ class MusicBrainzClient:
         )
 
     def get_artist_release_groups(self, artist_mbid: str) -> list[dict]:
+        # `status` only filters inc=releases — release-groups have no status
+        # field (that's a per-release property) — so it can't be passed here;
+        # doing so makes MusicBrainz reject the whole request with a 400.
         data = self._get(
             f"/artist/{artist_mbid}",
-            {"inc": "release-groups", "type": "album", "status": "official"},
+            {"inc": "release-groups", "type": "album"},
         )
         return data.get("release-groups", [])
 

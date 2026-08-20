@@ -1,7 +1,6 @@
 # audiofile
 
-A self-hosted Soulseek music downloader — search, grab, auto-tag, and organize —
-built as a replacement for tools like Dropped Needle / SoulSync.
+A self-hosted Soulseek music downloader — search, grab, auto-tag, and organize
 
 - **Search & download** tracks and albums from Soulseek through a web UI.
 - **Library**: browse your Plex music library — artists, then their albums,

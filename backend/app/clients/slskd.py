@@ -40,9 +40,19 @@ class SlskdClient:
             raise SlskdError(f"slskd {method} {path} -> {resp.status_code}: {resp.text[:300]}")
         return resp
 
-    def search(self, query: str, timeout_ms: int = 6000, poll_interval_s: float = 0.5) -> list[dict]:
-        """Start a search and block (with polling) until slskd reports it complete."""
-        resp = self._request("POST", "/api/v0/searches", json={"searchText": query})
+    def search(self, query: str, timeout_ms: int = 15000, poll_interval_s: float = 0.5) -> list[dict]:
+        """Start a search and block (with polling) until slskd reports it complete.
+
+        searchTimeout is passed through to slskd itself so its own notion of
+        "done" lines up with how long we're willing to poll for — without it,
+        slskd uses its own configured default, which may run longer than our
+        polling deadline and get us an empty/partial snapshot even though
+        results keep trickling in afterward (visible if you watch slskd's own
+        UI, which just keeps listening past that point).
+        """
+        resp = self._request(
+            "POST", "/api/v0/searches", json={"searchText": query, "searchTimeout": timeout_ms}
+        )
         search = resp.json()
         search_id = search["id"]
 

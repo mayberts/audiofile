@@ -26,7 +26,10 @@ def process_wanted_item(
     session.commit()
 
     try:
-        raw = slskd.search(_build_query(item))
+        # This runs in the background (scheduler tick or "Scan All Now"), not
+        # blocking a page load, so it can afford to wait longer than the
+        # interactive search page for slower-to-respond Soulseek peers.
+        raw = slskd.search(_build_query(item), timeout_ms=25000)
     except SlskdError as exc:
         logger.warning("search failed for wanted item %s: %s", item.id, exc)
         item.status = WantedStatus.FAILED

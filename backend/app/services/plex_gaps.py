@@ -90,31 +90,34 @@ def get_missing_tracks_for_album(plex: PlexServer, mb: MusicBrainzClient, album_
     }
 
 
+def get_artist_discography(mb: MusicBrainzClient, artist_name: str) -> list[dict]:
+    """Every studio album MusicBrainz lists for this artist name, most
+    recent first. Doesn't touch Plex at all, so it works for an artist you
+    don't own anything by yet — used to let someone pick specific albums to
+    want instead of adding one ambiguous "whole discography" entry."""
+    mb_artist = mb.search_artist(artist_name)
+    if not mb_artist:
+        return []
+
+    release_groups = mb.get_artist_release_groups(mb_artist["id"])
+    albums = [
+        {
+            "album": rg.get("title", ""),
+            "release_group_mbid": rg.get("id"),
+            "first_release_date": rg.get("first-release-date"),
+        }
+        for rg in release_groups
+        if _is_studio_album(rg)
+    ]
+    albums.sort(key=lambda a: a["first_release_date"] or "", reverse=True)
+    return albums
+
+
 def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artist_rating_key: str) -> list[dict]:
     """Studio albums MusicBrainz lists for this artist that aren't already
     in the Plex library — checked live, just for this one artist (two
     MusicBrainz requests), not a whole-library background scan."""
     artist = get_artist_item(plex, artist_rating_key)
-
-    mb_artist = mb.search_artist(artist.title)
-    if not mb_artist:
-        return []
-
     owned_normalized = {_normalize_title(t) for t in get_artist_album_titles(artist)}
-    release_groups = mb.get_artist_release_groups(mb_artist["id"])
-
-    missing = []
-    for rg in release_groups:
-        if not _is_studio_album(rg):
-            continue
-        title = rg.get("title", "")
-        if _title_variants(title) & owned_normalized:
-            continue
-        missing.append(
-            {
-                "album": title,
-                "release_group_mbid": rg.get("id"),
-                "first_release_date": rg.get("first-release-date"),
-            }
-        )
-    return missing
+    discography = get_artist_discography(mb, artist.title)
+    return [a for a in discography if not (_title_variants(a["album"]) & owned_normalized)]

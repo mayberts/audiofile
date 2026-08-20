@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 def _build_query(item: WantedItem) -> str:
     if item.track:
         return f"{item.artist} {item.track}"
-    return f"{item.artist} {item.album}"
+    if item.album:
+        return f"{item.artist} {item.album}"
+    return item.artist
 
 
 def process_wanted_item(

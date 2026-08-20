@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, WantedOut } from "../api/client";
+import DiscographyPicker from "../components/DiscographyPicker";
 
 export default function WantedPage() {
   const [items, setItems] = useState<WantedOut[]>([]);
@@ -8,6 +9,7 @@ export default function WantedPage() {
   const [track, setTrack] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [scanningAll, setScanningAll] = useState(false);
+  const [pickingArtist, setPickingArtist] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -26,10 +28,20 @@ export default function WantedPage() {
 
   async function onAdd(e: FormEvent) {
     e.preventDefault();
-    if (!artist.trim()) return;
+    const artistName = artist.trim();
+    if (!artistName) return;
+
+    // With just an artist name, a single wanted item can only ever chase
+    // down one random matching file — not the "whole discography" the
+    // empty field implies. Let the user pick specific albums instead.
+    if (!album.trim() && !track.trim()) {
+      setPickingArtist(artistName);
+      return;
+    }
+
     try {
       await api.createWanted({
-        artist: artist.trim(),
+        artist: artistName,
         album: album.trim() || undefined,
         track: track.trim() || undefined,
       });
@@ -129,6 +141,19 @@ export default function WantedPage() {
           </table>
         )}
       </div>
+
+      {pickingArtist && (
+        <DiscographyPicker
+          artist={pickingArtist}
+          onClose={() => setPickingArtist(null)}
+          onAdded={() => {
+            setArtist("");
+            setAlbum("");
+            setTrack("");
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

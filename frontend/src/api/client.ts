@@ -173,6 +173,8 @@ export const api = {
     request<{ cleared: number }>("/api/downloads/completed", { method: "DELETE" }),
 
   listWanted: () => request<WantedOut[]>("/api/wanted"),
+  getArtistDiscography: (artist: string) =>
+    request<MissingAlbumOut[]>(`/api/wanted/discography?artist=${encodeURIComponent(artist)}`),
   createWanted: (params: { artist: string; album?: string; track?: string }) =>
     request<WantedOut>("/api/wanted", { method: "POST", body: JSON.stringify(params) }),
   deleteWanted: (id: number) => request<void>(`/api/wanted/${id}`, { method: "DELETE" }),

@@ -72,11 +72,7 @@ export default function ArtistDetailPage() {
         </div>
       </div>
 
-      {bio && (
-        <div className="panel">
-          <p style={{ margin: 0, lineHeight: 1.5 }}>{bio}</p>
-        </div>
-      )}
+      {bio && <ArtistBio key={artistRatingKey} text={bio} />}
 
       {loading && <div className="panel">Loading...</div>}
       {error && <div className="panel error-text">{error}</div>}
@@ -91,6 +87,25 @@ export default function ArtistDetailPage() {
             <AlbumCard key={a.album} album={a} />
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+const BIO_PREVIEW_LENGTH = 400;
+
+function ArtistBio({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const needsTruncation = text.length > BIO_PREVIEW_LENGTH;
+  const shown = expanded || !needsTruncation ? text : `${text.slice(0, BIO_PREVIEW_LENGTH).trimEnd()}…`;
+
+  return (
+    <div className="panel">
+      <p style={{ margin: 0, lineHeight: 1.5 }}>{shown}</p>
+      {needsTruncation && (
+        <button className="secondary" style={{ marginTop: "0.7rem" }} onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Show less" : "Show more"}
+        </button>
       )}
     </div>
   );

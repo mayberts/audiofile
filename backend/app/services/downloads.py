@@ -8,7 +8,7 @@ from sqlmodel import Session
 from ..clients.musicbrainz import MusicBrainzClient, TrackMetadata
 from ..clients.slskd import SlskdClient, find_transfer
 from ..config import Settings
-from ..models import DownloadRecord, DownloadStatus
+from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedStatus
 from . import organizer, tagging
 
 logger = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def process_completed_download(
         record.error = "downloaded file not found on disk"
         session.add(record)
         session.commit()
+        _sync_wanted_item(session, record)
         return
 
     try:
@@ -152,4 +153,24 @@ def process_completed_download(
         record.error = str(exc)
 
     session.add(record)
+    session.commit()
+    _sync_wanted_item(session, record)
+
+
+def _sync_wanted_item(session: Session, record: DownloadRecord) -> None:
+    """Reflects a finished download back onto its wanted-list entry, which
+    otherwise stays stuck on DOWNLOADING forever — nothing else transitions
+    it once the DownloadRecord itself reaches a terminal state."""
+    if record.wanted_item_id is None:
+        return
+    wanted = session.get(WantedItem, record.wanted_item_id)
+    if wanted is None:
+        return
+    if record.status == DownloadStatus.DONE:
+        wanted.status = WantedStatus.DOWNLOADED
+        wanted.last_error = None
+    elif record.status == DownloadStatus.FAILED:
+        wanted.status = WantedStatus.FAILED
+        wanted.last_error = record.error
+    session.add(wanted)
     session.commit()

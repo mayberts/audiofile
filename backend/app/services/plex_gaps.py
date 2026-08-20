@@ -23,14 +23,33 @@ _EDITION_SUFFIX_RE = re.compile(
     r"anniversary|expanded|reissue|explicit|edition)\b[^)\]]*[\)\]]",
     re.IGNORECASE,
 )
+# Hyphens/dashes act as word separators ("Self-Destruct" vs "Self Destruct"
+# vs "Self–Destruct" are all the same words to a listener) so they become a
+# space rather than being deleted outright — deleting them would otherwise
+# collapse "Self-Destruct" into the single word "selfdestruct", which no
+# longer matches a Plex tag spelled with a plain space.
+_HYPHEN_RE = re.compile("[-‐‑‒–—―]")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _normalize_title(title: str) -> str:
     title = _EDITION_SUFFIX_RE.sub("", title)
+    title = _HYPHEN_RE.sub(" ", title)
     title = _NON_WORD_RE.sub("", title)
     return _WHITESPACE_RE.sub(" ", title).strip().lower()
+
+
+def _title_variants(title: str) -> set[str]:
+    """The full normalized title, plus (if the title has a ": subtitle"
+    suffix) just the part before the colon — MusicBrainz sometimes carries
+    the full official title ("Animal Ambition: An Untamed Desire to Win")
+    for an album Plex just has tagged with the short marketing title
+    ("Animal Ambition")."""
+    variants = {_normalize_title(title)}
+    if ":" in title:
+        variants.add(_normalize_title(title.split(":", 1)[0]))
+    return variants
 
 
 def _is_studio_album(rg: dict) -> bool:
@@ -56,7 +75,7 @@ def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artis
         if not _is_studio_album(rg):
             continue
         title = rg.get("title", "")
-        if _normalize_title(title) in owned_normalized:
+        if _title_variants(title) & owned_normalized:
             continue
         missing.append(
             {

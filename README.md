@@ -65,6 +65,9 @@ them.
    - `HOST_LIBRARY_DIR` — where the tagged, organized library should be
      written. Point this at your Plex "Music" library's root folder so new
      downloads show up there after a Plex library scan.
+   - `HOST_APPDATA_DIR` — where audiofile's own database and settings live
+     (e.g. `/mnt/user/appdata/audiofile` on Unraid). Back this up; it's the
+     wanted list, download history, and everything set on the Settings page.
 
 2. Start everything:
 

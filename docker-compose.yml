@@ -13,7 +13,9 @@ services:
       # downloads into — see README for how to find it.
       - ${HOST_DOWNLOADS_DIR:-./data/downloads}:/downloads
       - ${HOST_LIBRARY_DIR:-./data/music}:/music
-      - backend_data:/data
+      # Holds the SQLite database (wanted list, download history) and the
+      # settings.json the Settings page writes to — back this up.
+      - ${HOST_APPDATA_DIR:-./data/appdata}:/data
     ports:
       - "8000:8000"
     # Lets the container reach a slskd instance published on the host via
@@ -30,7 +32,3 @@ services:
       - backend
     ports:
       - "3000:80"
-
-volumes:
-  backend_data:
-    driver: local

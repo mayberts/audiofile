@@ -59,6 +59,7 @@ export interface WantedOut {
 export interface LibraryAlbumOut {
   artist: string;
   artist_thumb: string | null;
+  artist_rating_key: string | null;
   album: string;
   thumb: string | null;
   year: number | null;
@@ -146,6 +147,8 @@ export const api = {
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
   getAlbumTracks: (ratingKey: string) => request<TrackOut[]>(`/api/plex/album/${ratingKey}/tracks`),
+  getArtistBio: (ratingKey: string) =>
+    request<{ summary: string }>(`/api/plex/artist/${ratingKey}/bio`),
   plexImageUrl: (path: string) => `/api/plex/image?path=${encodeURIComponent(path)}`,
 
   scanPlexGaps: (limitArtists?: number) =>

@@ -79,6 +79,7 @@ class WantedOut(BaseModel):
 class LibraryAlbumOut(BaseModel):
     artist: str
     artist_thumb: Optional[str] = None
+    artist_rating_key: Optional[str] = None
     album: str
     thumb: Optional[str] = None
     year: Optional[int] = None

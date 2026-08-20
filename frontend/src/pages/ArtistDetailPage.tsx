@@ -32,7 +32,18 @@ export default function ArtistDetailPage() {
   }, [albums, artistName]);
 
   const artistThumb = artistAlbums.find((a) => a.artist_thumb)?.artist_thumb ?? null;
+  const artistRatingKey = artistAlbums.find((a) => a.artist_rating_key)?.artist_rating_key ?? null;
   const totalTracks = artistAlbums.reduce((sum, a) => sum + (a.track_count ?? 0), 0);
+
+  const [bio, setBio] = useState<string | null>(null);
+  useEffect(() => {
+    setBio(null);
+    if (!artistRatingKey) return;
+    api
+      .getArtistBio(artistRatingKey)
+      .then((res) => setBio(res.summary))
+      .catch(() => setBio(null));
+  }, [artistRatingKey]);
 
   return (
     <div>
@@ -60,6 +71,12 @@ export default function ArtistDetailPage() {
           )}
         </div>
       </div>
+
+      {bio && (
+        <div className="panel">
+          <p style={{ margin: 0, lineHeight: 1.5 }}>{bio}</p>
+        </div>
+      )}
 
       {loading && <div className="panel">Loading...</div>}
       {error && <div className="panel error-text">{error}</div>}

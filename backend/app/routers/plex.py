@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
-from ..clients.plex import PlexNotConfigured, get_album_tracks, get_library_albums, get_plex_server
+from ..clients.plex import PlexNotConfigured, get_album_tracks, get_artist_bio, get_library_albums, get_plex_server
 from ..config import get_settings
 from ..database import get_session
 from ..models import PlexMissingAlbum, WantedItem, WantedSource
@@ -29,6 +29,18 @@ def get_library():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not load Plex library: {exc}") from exc
+
+
+@router.get("/artist/{rating_key}/bio")
+def get_artist_bio_endpoint(rating_key: str):
+    settings = get_settings()
+    try:
+        plex = get_plex_server(settings)
+        return {"summary": get_artist_bio(plex, rating_key)}
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not load artist bio: {exc}") from exc
 
 
 @router.get("/album/{rating_key}/tracks", response_model=list[TrackOut])

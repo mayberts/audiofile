@@ -46,10 +46,13 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
             albums.append(
                 {
                     "artist": album.parentTitle,
-                    # parentThumb is the artist's image, thumb is the album's
-                    # own cover — both already included on each album's
-                    # metadata, so this needs no extra requests.
+                    # parentThumb is the artist's image, parentRatingKey is
+                    # the artist's own item id (used to fetch its bio on
+                    # demand), thumb is the album's own cover — all already
+                    # included on each album's metadata, so none of this
+                    # needs extra requests.
                     "artist_thumb": getattr(album, "parentThumb", None),
+                    "artist_rating_key": str(album.parentRatingKey) if getattr(album, "parentRatingKey", None) else None,
                     "album": album.title,
                     "thumb": getattr(album, "thumb", None),
                     "year": album.year,
@@ -58,6 +61,11 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
                 }
             )
     return albums
+
+
+def get_artist_bio(plex: PlexServer, rating_key: str) -> str:
+    artist = plex.fetchItem(int(rating_key))
+    return getattr(artist, "summary", None) or ""
 
 
 def get_album_tracks(plex: PlexServer, rating_key: str) -> list[dict]:

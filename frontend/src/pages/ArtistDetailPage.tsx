@@ -48,6 +48,7 @@ export default function ArtistDetailPage() {
   const [missingAlbums, setMissingAlbums] = useState<MissingAlbumOut[] | null>(null);
   const [missingLoading, setMissingLoading] = useState(false);
   const [missingError, setMissingError] = useState<string | null>(null);
+  const [missingAttempt, setMissingAttempt] = useState(0);
   useEffect(() => {
     setMissingAlbums(null);
     setMissingError(null);
@@ -58,7 +59,7 @@ export default function ArtistDetailPage() {
       .then(setMissingAlbums)
       .catch((err) => setMissingError(err instanceof Error ? err.message : String(err)))
       .finally(() => setMissingLoading(false));
-  }, [artistRatingKey]);
+  }, [artistRatingKey, missingAttempt]);
 
   return (
     <div>
@@ -107,7 +108,20 @@ export default function ArtistDetailPage() {
 
           <h2 style={{ marginTop: "1.5rem" }}>Missing Albums</h2>
           {missingLoading && <div className="panel">Checking MusicBrainz...</div>}
-          {missingError && <div className="panel error-text">{missingError}</div>}
+          {missingError && (
+            <div className="panel">
+              <p className="error-text" style={{ margin: 0 }}>
+                {missingError}
+              </p>
+              <button
+                className="secondary"
+                style={{ marginTop: "0.7rem" }}
+                onClick={() => setMissingAttempt((n) => n + 1)}
+              >
+                Try again
+              </button>
+            </div>
+          )}
           {!missingLoading && !missingError && missingAlbums && missingAlbums.length === 0 && (
             <div className="panel empty">Nothing missing — you have every studio album MusicBrainz knows about.</div>
           )}

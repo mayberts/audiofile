@@ -52,6 +52,15 @@ def get_missing_albums(rating_key: str):
         return get_missing_albums_for_artist(plex, mb, rating_key)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Missing-albums check failed for artist %s: %s", rating_key, exc)
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=503, detail="MusicBrainz is temporarily unavailable — try again in a moment."
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"MusicBrainz returned an error ({exc.response.status_code})."
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("Missing-albums check failed for artist %s", rating_key)
         raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc

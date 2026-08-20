@@ -43,23 +43,21 @@ class SlskdClient:
     def search(self, query: str, timeout_ms: int = 15000, poll_interval_s: float = 0.5) -> list[dict]:
         """Start a search and block (with polling) until slskd reports it complete.
 
-        slskd's searchTimeout field is seconds, not milliseconds — it's an
-        idle timeout that resets on every new response, with a server-side
-        minimum of 5. Sending it milliseconds (e.g. 15000) told slskd to
-        wait ~4 hours of silence before calling the search done, since the
-        [Range(5, int.MaxValue)] validator happily accepts a number that
-        large without complaint. Converting to seconds here is what actually
-        lines slskd's own notion of "done" up with how long we're willing to
-        poll for.
+        Deliberately sends only searchText, same as slskd's own web UI (its
+        search creation call posts just {id, searchText}, nothing else) —
+        not a custom searchTimeout. slskd's real search timeout is an idle
+        timer that resets on every new response, so a search legitimately
+        stays open and keeps accumulating results well past any short fixed
+        value; overriding it ourselves only shortens that window and makes
+        us more likely to give up during a lull. We just poll for up to our
+        own timeout_ms, patiently, and take whatever's accumulated by then —
+        same effective result as the UI, without capping slskd's own search.
         """
-        search_timeout_s = max(5, round(timeout_ms / 1000))
-        resp = self._request(
-            "POST", "/api/v0/searches", json={"searchText": query, "searchTimeout": search_timeout_s}
-        )
+        resp = self._request("POST", "/api/v0/searches", json={"searchText": query})
         search = resp.json()
         search_id = search["id"]
 
-        deadline = time.monotonic() + search_timeout_s + 10.0
+        deadline = time.monotonic() + (timeout_ms / 1000.0) + 10.0
         while time.monotonic() < deadline:
             status_resp = self._request("GET", f"/api/v0/searches/{search_id}")
             status = status_resp.json()

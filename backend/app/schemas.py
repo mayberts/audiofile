@@ -9,7 +9,7 @@ from .models import DownloadStatus, WantedSource, WantedStatus
 
 class SearchRequest(BaseModel):
     query: str
-    timeout_ms: int = 15000
+    timeout_ms: int = 20000
 
 
 class SearchFile(BaseModel):

@@ -36,6 +36,22 @@ Soulseek protocol. `docker-compose.yml` here does **not** run slskd itself —
 it assumes you already have a slskd container/instance running (its own
 compose file, a standalone container, whatever) and just connects to it.
 
+## Images
+
+Backend and frontend images are built and published to GHCR on every push to
+`main` (and on version tags) by `.github/workflows/docker-publish.yml`:
+
+- `ghcr.io/mayberts/audiofile-backend:latest`
+- `ghcr.io/mayberts/audiofile-frontend:latest`
+
+`docker-compose.yml` pulls these directly — no local build context needed, so
+it works as-is on Unraid's Compose Manager (or anywhere else) without
+checking out the repo. The first time the workflow runs, the packages are
+created **private** by default; make them public from your GitHub profile's
+**Packages** tab (Package settings → Change visibility), or `docker login
+ghcr.io` with a PAT that has `read:packages` on whatever host is pulling
+them.
+
 ## Running it
 
 1. Copy `.env.example` to `.env` and fill in:
@@ -53,8 +69,12 @@ compose file, a standalone container, whatever) and just connects to it.
 2. Start everything:
 
    ```sh
-   docker compose up -d --build
+   docker compose up -d
    ```
+
+   (On Unraid Compose Manager: paste `docker-compose.yml`'s contents into a
+   new stack, fill in the same env vars via its `.env` editor, and hit
+   Compose Up — no git clone required.)
 
 3. Open the web UI at `http://localhost:3000` and go to **Settings** to
    connect it to your existing slskd:
@@ -118,6 +138,12 @@ The Vite dev server proxies `/api` to `http://localhost:8000` by default
 (override with `VITE_API_PROXY_TARGET`). You'll still need a running slskd
 instance somewhere reachable — configure its URL from the Settings page —
 for search/download to work.
+
+To build the images locally instead of pulling from GHCR (e.g. to test a
+change before it's published), run `docker build -t audiofile-backend
+./backend` / `docker build -t audiofile-frontend ./frontend`, then swap the
+`image:` lines in `docker-compose.yml` for `build: ./backend` / `build:
+./frontend` locally — don't commit that swap.
 
 ## Known limitations (MVP)
 

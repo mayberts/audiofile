@@ -1,6 +1,6 @@
 services:
   backend:
-    build: ./backend
+    image: ghcr.io/mayberts/audiofile-backend:latest
     container_name: audiofile-backend
     restart: unless-stopped
     environment:
@@ -23,7 +23,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   frontend:
-    build: ./frontend
+    image: ghcr.io/mayberts/audiofile-frontend:latest
     container_name: audiofile-frontend
     restart: unless-stopped
     depends_on:

@@ -1,91 +1,145 @@
 import { useEffect, useState } from "react";
 import { api, SettingsOut } from "../api/client";
 
+type TestState = { status: "idle" | "testing" | "ok" | "fail"; detail?: string | null };
+
+const IDLE: TestState = { status: "idle" };
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsOut | null>(null);
   const [form, setForm] = useState<Partial<SettingsOut>>({});
-  const [status, setStatus] = useState<string | null>(null);
-  const [slskdConnected, setSlskdConnected] = useState<boolean | null>(null);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  async function refresh() {
-    const data = await api.getSettings();
-    setSettings(data);
-  }
+  const [slskdTest, setSlskdTest] = useState<TestState>(IDLE);
+  const [plexTest, setPlexTest] = useState<TestState>(IDLE);
+  const [detecting, setDetecting] = useState(false);
 
   useEffect(() => {
-    refresh();
-    api
-      .slskdStatus()
-      .then((r) => setSlskdConnected(r.connected))
-      .catch(() => setSlskdConnected(false));
+    api.getSettings().then(setSettings);
   }, []);
 
   function field(key: keyof SettingsOut, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  const val = (key: keyof SettingsOut) =>
+    form[key] !== undefined ? String(form[key]) : settings ? String(settings[key]) : "";
+
   async function onSave() {
     setSaving(true);
-    setStatus(null);
+    setSaveStatus(null);
     try {
       const updated = await api.updateSettings(form);
       setSettings(updated);
       setForm({});
-      setStatus("Saved.");
-      api
-        .slskdStatus()
-        .then((r) => setSlskdConnected(r.connected))
-        .catch(() => setSlskdConnected(false));
+      setSaveStatus("Saved.");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
+      setSaveStatus(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
   }
 
-  if (!settings) return <div>Loading...</div>;
+  async function onTestSlskd() {
+    setSlskdTest({ status: "testing" });
+    try {
+      const res = await api.testSlskd(val("slskd_url"), (form.slskd_api_key as string) || "");
+      setSlskdTest({ status: res.connected ? "ok" : "fail", detail: res.detail });
+    } catch (err) {
+      setSlskdTest({ status: "fail", detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
-  const val = (key: keyof SettingsOut) => (form[key] !== undefined ? String(form[key]) : String(settings[key]));
+  async function onDetectSlskd() {
+    setDetecting(true);
+    setSlskdTest(IDLE);
+    try {
+      const found = await api.detectSlskd();
+      if (found.length > 0) {
+        field("slskd_url", found[0]);
+        setSlskdTest({ status: "ok" });
+      } else {
+        setSlskdTest({ status: "fail", detail: "No local slskd found — enter the URL manually." });
+      }
+    } catch (err) {
+      setSlskdTest({ status: "fail", detail: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  async function onTestPlex() {
+    setPlexTest({ status: "testing" });
+    try {
+      const res = await api.testPlex(val("plex_url"), (form.plex_token as string) || "");
+      setPlexTest({ status: res.connected ? "ok" : "fail", detail: res.detail });
+    } catch (err) {
+      setPlexTest({ status: "fail", detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  if (!settings) return <div>Loading...</div>;
 
   return (
     <div>
       <h1>Settings</h1>
 
       <div className="panel">
-        <h3 style={{ marginTop: 0 }}>slskd connection</h3>
+        <h3 style={{ marginTop: 0 }}>Soulseek (slskd)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Already running your own slskd container? Point this at wherever it's reachable — its
+          published host port (e.g. <code>http://host.docker.internal:5030</code>) or its
+          container name if you've joined it to the same Docker network.
+        </p>
         <div className="field">
           <label>slskd URL</label>
-          <input type="url" value={val("slskd_url")} onChange={(e) => field("slskd_url", e.target.value)} />
+          <div className="row">
+            <input type="url" placeholder="http://localhost:5030" value={val("slskd_url")} onChange={(e) => field("slskd_url", e.target.value)} />
+            <button className="secondary" onClick={onDetectSlskd} disabled={detecting}>
+              {detecting ? "Detecting..." : "Auto-detect"}
+            </button>
+          </div>
         </div>
         <div className="field">
-          <label>slskd API key</label>
+          <label>API key</label>
           <input
             type="password"
             placeholder="•••••••• (unchanged)"
             onChange={(e) => field("slskd_api_key", e.target.value)}
           />
         </div>
-        {slskdConnected !== null && (
-          <span className={`badge ${slskdConnected ? "done" : "failed"}`}>
-            {slskdConnected ? "Connected" : "Not reachable"}
-          </span>
-        )}
+        <div className="row">
+          <button className="secondary" onClick={onTestSlskd} disabled={slskdTest.status === "testing"}>
+            {slskdTest.status === "testing" ? "Testing..." : "Test Connection"}
+          </button>
+          {slskdTest.status === "ok" && <span className="badge done">Connected</span>}
+          {slskdTest.status === "fail" && <span className="badge failed">Not reachable</span>}
+          {slskdTest.detail && <span className="muted">{slskdTest.detail}</span>}
+        </div>
       </div>
 
       <div className="panel">
         <h3 style={{ marginTop: 0 }}>Plex</h3>
         <div className="field">
-          <label>Plex URL</label>
-          <input type="url" value={val("plex_url")} onChange={(e) => field("plex_url", e.target.value)} />
+          <label>Plex server URL</label>
+          <input type="url" placeholder="http://localhost:32400" value={val("plex_url")} onChange={(e) => field("plex_url", e.target.value)} />
         </div>
         <div className="field">
-          <label>Plex token</label>
+          <label>X-Plex-Token</label>
           <input
             type="password"
             placeholder="•••••••• (unchanged)"
             onChange={(e) => field("plex_token", e.target.value)}
           />
+        </div>
+        <div className="row">
+          <button className="secondary" onClick={onTestPlex} disabled={plexTest.status === "testing"}>
+            {plexTest.status === "testing" ? "Testing..." : "Test Connection"}
+          </button>
+          {plexTest.status === "ok" && <span className="badge done">Connected</span>}
+          {plexTest.status === "fail" && <span className="badge failed">Not reachable</span>}
+          {plexTest.detail && <span className="muted">{plexTest.detail}</span>}
         </div>
       </div>
 
@@ -100,12 +154,17 @@ export default function SettingsPage() {
           />
         </div>
         <div className="field">
-          <label>Download directory (shared with slskd)</label>
+          <label>Download directory (path inside this container)</label>
           <input
             type="text"
             value={val("download_dir")}
             onChange={(e) => field("download_dir", e.target.value)}
           />
+          <span className="muted">
+            This has to be the same physical folder slskd downloads into — set{" "}
+            <code>HOST_DOWNLOADS_DIR</code> in <code>.env</code> to bind-mount it here; a path
+            typed here alone won't create the mount.
+          </span>
         </div>
         <div className="field">
           <label>Organized library directory</label>
@@ -144,7 +203,7 @@ export default function SettingsPage() {
       <button onClick={onSave} disabled={saving}>
         {saving ? "Saving..." : "Save Settings"}
       </button>
-      {status && <span style={{ marginLeft: "0.8rem" }}>{status}</span>}
+      {saveStatus && <span style={{ marginLeft: "0.8rem" }}>{saveStatus}</span>}
     </div>
   );
 }

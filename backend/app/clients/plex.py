@@ -11,10 +11,14 @@ class PlexNotConfigured(RuntimeError):
     pass
 
 
-def get_plex_server(settings: Settings) -> PlexServer:
-    if not settings.plex_url or not settings.plex_token:
+def connect_plex(url: str, token: str) -> PlexServer:
+    if not url or not token:
         raise PlexNotConfigured("Plex URL/token are not configured yet")
-    return PlexServer(settings.plex_url, settings.plex_token)
+    return PlexServer(url, token)
+
+
+def get_plex_server(settings: Settings) -> PlexServer:
+    return connect_plex(settings.plex_url, settings.plex_token)
 
 
 def iter_music_artists(plex: PlexServer):

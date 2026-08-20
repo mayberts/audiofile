@@ -16,7 +16,7 @@ class Defaults(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    slskd_url: str = "http://slskd:5030"
+    slskd_url: str = "http://localhost:5030"
     slskd_api_key: str = ""
 
     plex_url: str = ""

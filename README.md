@@ -17,7 +17,7 @@ built as a replacement for tools like Dropped Needle / SoulSync.
 ## Architecture
 
 ```
-slskd (Soulseek client/daemon, REST API)
+slskd (Soulseek client/daemon, REST API) — you bring your own, already running
    ↑
 backend (FastAPI + SQLite)
    - clients/    slskd, MusicBrainz, Plex
@@ -32,17 +32,20 @@ frontend (React + Vite, served by nginx)
 
 Soulseek connectivity is handled entirely by [slskd](https://github.com/slskd/slskd),
 which the backend drives over its REST API — this avoids reimplementing the
-Soulseek protocol.
+Soulseek protocol. `docker-compose.yml` here does **not** run slskd itself —
+it assumes you already have a slskd container/instance running (its own
+compose file, a standalone container, whatever) and just connects to it.
 
 ## Running it
 
 1. Copy `.env.example` to `.env` and fill in:
-   - `SOULSEEK_USERNAME` / `SOULSEEK_PASSWORD` — your Soulseek account.
-   - `SLSKD_API_KEY` — any random string, used to lock down the API.
-   - `PLEX_URL` / `PLEX_TOKEN` — optional, only needed for the Plex gap-fill
-     feature. Leave blank to skip it.
    - `MUSICBRAINZ_CONTACT` — a real contact (email or URL), required by
      MusicBrainz's API usage policy.
+   - `HOST_DOWNLOADS_DIR` — the host folder your existing slskd container
+     downloads into. This **must** be the same physical folder — audiofile
+     reads finished files from it, tags them, and moves them out. Check your
+     slskd container's own volume mounts (e.g. `docker inspect <slskd-container>`)
+     to find the host path it uses.
    - `HOST_LIBRARY_DIR` — where the tagged, organized library should be
      written. Point this at your Plex "Music" library's root folder so new
      downloads show up there after a Plex library scan.
@@ -53,15 +56,26 @@ Soulseek protocol.
    docker compose up -d --build
    ```
 
-3. Open the web UI at `http://localhost:3000`.
-   - The slskd web UI is also available directly at `http://localhost:5030`
-     if you want to debug connectivity or watch raw transfers.
-   - The backend API is at `http://localhost:8000` (interactive docs at
-     `/docs`).
+3. Open the web UI at `http://localhost:3000` and go to **Settings** to
+   connect it to your existing slskd:
+   - **slskd URL** — try **Auto-detect** first (it checks `localhost:5030`,
+     `host.docker.internal:5030`, and a `slskd` hostname on the same Docker
+     network). Otherwise enter it manually: if your slskd container publishes
+     a port, use `http://host.docker.internal:<port>`; if it doesn't, run
+     `docker network connect <slskd's-network> audiofile-backend` and use its
+     container name instead, e.g. `http://slskd:5030`.
+   - **API key** — whatever slskd's own `SLSKD_API_KEY` (or `web.authentication.api_keys`)
+     is set to.
+   - Hit **Test Connection** to confirm before saving.
+   - **Plex** (optional, for gap-fill) — URL + `X-Plex-Token`, also with a
+     Test Connection button. ([How to find your Plex token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).)
+
+   The backend API is at `http://localhost:8000` (interactive docs at
+   `/docs`).
 
 All settings (slskd URL/API key, Plex URL/token, library paths, preferred
-formats, minimum bitrate, scan interval) can also be changed later from the
-**Settings** page without restarting containers.
+formats, minimum bitrate, scan interval) live in the **Settings** page and
+take effect immediately — no container restart needed.
 
 ## How the wanted list works
 
@@ -102,7 +116,7 @@ npm run dev
 
 The Vite dev server proxies `/api` to `http://localhost:8000` by default
 (override with `VITE_API_PROXY_TARGET`). You'll still need a running slskd
-instance — either via `docker compose up slskd` or installed separately —
+instance somewhere reachable — configure its URL from the Settings page —
 for search/download to work.
 
 ## Known limitations (MVP)

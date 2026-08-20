@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 @router.post("", response_model=SearchResponse)
 def run_search(payload: SearchRequest):
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     try:
         raw = slskd.search(payload.query, timeout_ms=payload.timeout_ms)
     except SlskdError as exc:
@@ -31,7 +31,7 @@ def run_search(payload: SearchRequest):
 @router.post("/download", response_model=DownloadOut)
 def download_result(payload: DownloadRequest, session: Session = Depends(get_session)):
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     try:
         slskd.enqueue_download(payload.username, [{"filename": payload.filename, "size": payload.size}])
     except SlskdError as exc:

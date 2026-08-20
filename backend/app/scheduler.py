@@ -20,7 +20,7 @@ _scheduler: BackgroundScheduler | None = None
 
 def poll_downloads_job() -> None:
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     mb = MusicBrainzClient(settings)
     try:
         with Session(engine) as session:
@@ -40,7 +40,7 @@ def poll_downloads_job() -> None:
 
 def process_wanted_job() -> None:
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     try:
         with Session(engine) as session:
             count = wanted_service.process_all_wanted(session, slskd, settings)

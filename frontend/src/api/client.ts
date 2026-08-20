@@ -65,6 +65,11 @@ export interface PlexGapOut {
   added_to_wanted: boolean;
 }
 
+export interface ConnectionTestResult {
+  connected: boolean;
+  detail: string | null;
+}
+
 export interface SettingsOut {
   slskd_url: string;
   slskd_api_key: string;
@@ -135,5 +140,16 @@ export const api = {
   getSettings: () => request<SettingsOut>("/api/settings"),
   updateSettings: (patch: Partial<SettingsOut>) =>
     request<SettingsOut>("/api/settings", { method: "PUT", body: JSON.stringify(patch) }),
-  slskdStatus: () => request<{ connected: boolean }>("/api/settings/slskd-status"),
+
+  testSlskd: (url: string, apiKey: string) =>
+    request<ConnectionTestResult>("/api/settings/test-slskd", {
+      method: "POST",
+      body: JSON.stringify({ url, api_key: apiKey }),
+    }),
+  testPlex: (url: string, token: string) =>
+    request<ConnectionTestResult>("/api/settings/test-plex", {
+      method: "POST",
+      body: JSON.stringify({ url, token }),
+    }),
+  detectSlskd: () => request<string[]>("/api/settings/detect-slskd"),
 };

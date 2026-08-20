@@ -25,7 +25,7 @@ def cancel_download(download_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="download not found")
 
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     try:
         slskd.cancel_download(record.slskd_username, record.slskd_filename)
     except SlskdError:

@@ -43,7 +43,7 @@ def scan_now(wanted_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="wanted item not found")
 
     settings = get_settings()
-    slskd = SlskdClient(settings)
+    slskd = SlskdClient.from_settings(settings)
     try:
         process_wanted_item(session, item, slskd, settings)
     finally:
@@ -60,7 +60,7 @@ def scan_all(background_tasks: BackgroundTasks):
 
         from ..database import engine
 
-        slskd = SlskdClient(settings)
+        slskd = SlskdClient.from_settings(settings)
         try:
             with _Session(engine) as session:
                 process_all_wanted(session, slskd, settings)

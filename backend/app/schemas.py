@@ -88,6 +88,21 @@ class PlexGapOut(BaseModel):
         from_attributes = True
 
 
+class TestSlskdRequest(BaseModel):
+    url: str
+    api_key: str = ""
+
+
+class TestPlexRequest(BaseModel):
+    url: str
+    token: str = ""
+
+
+class ConnectionTestResult(BaseModel):
+    connected: bool
+    detail: Optional[str] = None
+
+
 class SettingsUpdate(BaseModel):
     slskd_url: Optional[str] = None
     slskd_api_key: Optional[str] = None

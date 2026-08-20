@@ -15,14 +15,18 @@ class SlskdError(RuntimeError):
 class SlskdClient:
     """Thin wrapper around the slskd REST API (https://github.com/slskd/slskd)."""
 
-    def __init__(self, settings: Settings):
-        self.base_url = settings.slskd_url.rstrip("/")
-        self.api_key = settings.slskd_api_key
+    def __init__(self, base_url: str, api_key: str = ""):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self._client = httpx.Client(
             base_url=self.base_url,
             headers={"X-API-Key": self.api_key} if self.api_key else {},
             timeout=30.0,
         )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "SlskdClient":
+        return cls(settings.slskd_url, settings.slskd_api_key)
 
     def close(self) -> None:
         self._client.close()

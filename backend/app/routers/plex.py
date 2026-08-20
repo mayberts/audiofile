@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
@@ -10,6 +12,8 @@ from ..database import get_session
 from ..models import PlexMissingAlbum, WantedItem, WantedSource
 from ..schemas import PlexGapOut
 from ..services.plex_gaps import scan_for_gaps
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/plex", tags=["plex"])
 
@@ -22,6 +26,9 @@ def trigger_scan(limit_artists: int | None = None, session: Session = Depends(ge
         missing = scan_for_gaps(session, settings, mb, limit_artists=limit_artists)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface the real cause instead of a bare 500
+        logger.exception("Plex gap scan failed")
+        raise HTTPException(status_code=502, detail=f"Plex gap scan failed: {exc}") from exc
     finally:
         mb.close()
     return {"new_missing_albums": missing}

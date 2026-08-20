@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -11,6 +12,16 @@ from ..config import Settings
 
 MB_BASE = "https://musicbrainz.org/ws/2"
 COVER_ART_BASE = "https://coverartarchive.org"
+
+# MusicBrainz's search API parses queries as Lucene syntax, so names
+# containing Lucene operators/quote characters (AC/DC, "Weird Al" Yankovic,
+# Panic! at the Disco, blink-182, Wu-Tang Clan, ...) need those characters
+# escaped or the query is malformed and MusicBrainz returns a 400.
+_LUCENE_SPECIAL = re.compile(r'([+\-!(){}\[\]^"~*?:\\/&|])')
+
+
+def _escape_lucene(text: str) -> str:
+    return _LUCENE_SPECIAL.sub(r"\\\1", text)
 
 # MusicBrainz asks for at most ~1 request/second from a given client.
 _last_request_lock = threading.Lock()
@@ -78,7 +89,7 @@ class MusicBrainzClient:
         return resp.json()
 
     def search_release(self, artist: str, album: str) -> Optional[ReleaseMatch]:
-        query = f'artist:"{artist}" AND release:"{album}"'
+        query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(album)}"'
         data = self._get("/release", {"query": query, "limit": 5})
         releases = data.get("releases", [])
         if not releases:
@@ -125,7 +136,7 @@ class MusicBrainzClient:
         )
 
     def search_recording(self, artist: str, track: str) -> Optional[TrackMetadata]:
-        query = f'artist:"{artist}" AND recording:"{track}"'
+        query = f'artist:"{_escape_lucene(artist)}" AND recording:"{_escape_lucene(track)}"'
         data = self._get("/recording", {"query": query, "limit": 5})
         recordings = data.get("recordings", [])
         if not recordings:
@@ -155,7 +166,7 @@ class MusicBrainzClient:
         return data.get("release-groups", [])
 
     def search_artist(self, name: str) -> Optional[dict]:
-        data = self._get("/artist", {"query": f'artist:"{name}"', "limit": 5})
+        data = self._get("/artist", {"query": f'artist:"{_escape_lucene(name)}"', "limit": 5})
         artists = data.get("artists", [])
         return artists[0] if artists else None
 

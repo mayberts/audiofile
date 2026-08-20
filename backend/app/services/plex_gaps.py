@@ -32,12 +32,16 @@ def scan_for_gaps(session: Session, settings: Settings, mb: MusicBrainzClient, l
             break
         scanned += 1
 
-        mb_artist = mb.search_artist(artist.title)
-        if not mb_artist:
-            continue
+        try:
+            mb_artist = mb.search_artist(artist.title)
+            if not mb_artist:
+                continue
 
-        owned = get_artist_album_titles(artist)
-        release_groups = mb.get_artist_release_groups(mb_artist["id"])
+            owned = get_artist_album_titles(artist)
+            release_groups = mb.get_artist_release_groups(mb_artist["id"])
+        except Exception:  # noqa: BLE001 — one bad artist shouldn't abort the whole scan
+            logger.warning("skipping %r during Plex gap scan", artist.title, exc_info=True)
+            continue
 
         for rg in release_groups:
             if not _is_studio_album(rg):

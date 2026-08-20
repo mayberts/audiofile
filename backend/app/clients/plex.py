@@ -46,6 +46,9 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
             albums.append(
                 {
                     "artist": album.parentTitle,
+                    # parentThumb is the artist's image — already included on
+                    # each album's metadata, so this needs no extra requests.
+                    "artist_thumb": getattr(album, "parentThumb", None),
                     "album": album.title,
                     "year": album.year,
                     "track_count": getattr(album, "leafCount", None),

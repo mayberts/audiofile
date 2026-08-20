@@ -1,10 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, LibraryAlbumOut } from "../api/client";
 
-// Module-level cache so the list survives navigating away and back — React
-// Router unmounts this component on route change, which would otherwise
-// throw away the fetched data and force a full Plex re-scan on every visit.
 let libraryCache: LibraryAlbumOut[] | null = null;
+
+interface ArtistSummary {
+  artist: string;
+  thumb: string | null;
+  albumCount: number;
+  trackCount: number;
+  albumTitles: string[];
+}
+
+function summarizeByArtist(albums: LibraryAlbumOut[]): ArtistSummary[] {
+  const byArtist = new Map<string, ArtistSummary>();
+  for (const a of albums) {
+    let entry = byArtist.get(a.artist);
+    if (!entry) {
+      entry = { artist: a.artist, thumb: a.artist_thumb, albumCount: 0, trackCount: 0, albumTitles: [] };
+      byArtist.set(a.artist, entry);
+    }
+    entry.albumCount += 1;
+    entry.trackCount += a.track_count ?? 0;
+    entry.albumTitles.push(a.album);
+    if (!entry.thumb && a.artist_thumb) entry.thumb = a.artist_thumb;
+  }
+  return [...byArtist.values()].sort((x, y) => x.artist.localeCompare(y.artist));
+}
+
+function ArtistCard({ artist }: { artist: ArtistSummary }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImage = artist.thumb && !imgFailed;
+
+  return (
+    <div className="artist-card">
+      {showImage ? (
+        <img
+          src={api.plexImageUrl(artist.thumb!)}
+          alt={artist.artist}
+          loading="lazy"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        <div className="artist-card-fallback">{artist.artist.charAt(0).toUpperCase()}</div>
+      )}
+      <div className="artist-card-label">
+        <div className="artist-card-name">{artist.artist}</div>
+        <div className="artist-card-meta">
+          {artist.trackCount} track{artist.trackCount === 1 ? "" : "s"}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function LibraryPage() {
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryCache);
@@ -17,7 +64,6 @@ export default function LibraryPage() {
     setError(null);
     try {
       const data = await api.getLibrary();
-      data.sort((a, b) => a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album));
       libraryCache = data;
       setAlbums(data);
     } catch (err) {
@@ -28,24 +74,20 @@ export default function LibraryPage() {
   }
 
   useEffect(() => {
-    // Only auto-fetch the first time this page is ever visited in a
-    // session — on later visits the cached list above is shown instantly,
-    // and "Scan Plex Library" is there for an explicit refresh.
     if (libraryCache === null) {
       load();
     }
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!albums) return [];
-    const q = filter.trim().toLowerCase();
-    if (!q) return albums;
-    return albums.filter(
-      (a) => a.artist.toLowerCase().includes(q) || a.album.toLowerCase().includes(q),
-    );
-  }, [albums, filter]);
+  const artists = useMemo(() => summarizeByArtist(albums || []), [albums]);
 
-  const artistCount = useMemo(() => new Set((albums || []).map((a) => a.artist)).size, [albums]);
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return artists;
+    return artists.filter(
+      (a) => a.artist.toLowerCase().includes(q) || a.albumTitles.some((t) => t.toLowerCase().includes(q)),
+    );
+  }, [artists, filter]);
 
   return (
     <div>
@@ -67,44 +109,26 @@ export default function LibraryPage() {
 
       {albums && (
         <p className="muted" style={{ margin: "0 0 0.6rem" }}>
-          {albums.length} album{albums.length === 1 ? "" : "s"} across {artistCount} artist
-          {artistCount === 1 ? "" : "s"}
+          {albums.length} album{albums.length === 1 ? "" : "s"} across {artists.length} artist
+          {artists.length === 1 ? "" : "s"}
           {filter.trim() && ` — ${filtered.length} matching`}
         </p>
       )}
 
-      <div className="panel">
-        {!albums && !loading && !error && <div className="empty">Nothing loaded yet.</div>}
-        {albums && filtered.length === 0 && (
-          <div className="empty">
-            {albums.length === 0
-              ? "No albums found in your Plex music library."
-              : "No albums match that filter."}
-          </div>
-        )}
-        {filtered.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Artist</th>
-                <th>Album</th>
-                <th>Year</th>
-                <th>Tracks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((a, i) => (
-                <tr key={`${a.artist}::${a.album}::${i}`}>
-                  <td>{a.artist}</td>
-                  <td>{a.album}</td>
-                  <td className="muted">{a.year ?? "—"}</td>
-                  <td className="muted">{a.track_count ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {!albums && !loading && !error && <div className="panel empty">Nothing loaded yet.</div>}
+      {albums && filtered.length === 0 && (
+        <div className="panel empty">
+          {artists.length === 0 ? "No albums found in your Plex music library." : "No artists match that filter."}
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div className="artist-grid">
+          {filtered.map((a) => (
+            <ArtistCard key={a.artist} artist={a} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

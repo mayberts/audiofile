@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
@@ -28,6 +29,33 @@ def get_library():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not load Plex library: {exc}") from exc
+
+
+@router.get("/image")
+def get_image(path: str):
+    """Proxies artwork from Plex so the browser never sees the Plex token —
+    library listings only hand out these Plex-relative paths, not full URLs."""
+    if not path.startswith("/library/"):
+        raise HTTPException(status_code=400, detail="invalid image path")
+
+    settings = get_settings()
+    try:
+        get_plex_server(settings)  # cheap: reuses the same config validation
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    url = f"{settings.plex_url.rstrip('/')}{path}"
+    try:
+        resp = httpx.get(url, headers={"X-Plex-Token": settings.plex_token}, timeout=15.0)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch image from Plex: {exc}") from exc
+
+    return Response(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.post("/scan")

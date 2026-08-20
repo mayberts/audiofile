@@ -58,6 +58,7 @@ export interface WantedOut {
 
 export interface LibraryAlbumOut {
   artist: string;
+  artist_thumb: string | null;
   album: string;
   year: number | null;
   track_count: number | null;
@@ -136,6 +137,7 @@ export const api = {
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
+  plexImageUrl: (path: string) => `/api/plex/image?path=${encodeURIComponent(path)}`,
 
   scanPlexGaps: (limitArtists?: number) =>
     request<{ status: string }>(

@@ -17,7 +17,7 @@ services:
       # settings.json the Settings page writes to — back this up.
       - ${HOST_APPDATA_DIR:-./data/appdata}:/data
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     # Lets the container reach a slskd instance published on the host via
     # http://host.docker.internal:<port> (works on Docker Desktop out of the
     # box; this extra_hosts entry makes it resolve on Linux too).
@@ -31,4 +31,4 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"

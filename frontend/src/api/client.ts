@@ -63,6 +63,13 @@ export interface LibraryAlbumOut {
   thumb: string | null;
   year: number | null;
   track_count: number | null;
+  rating_key: string | null;
+}
+
+export interface TrackOut {
+  title: string;
+  track_number: number | null;
+  duration_ms: number | null;
 }
 
 export interface PlexGapOut {
@@ -138,6 +145,7 @@ export const api = {
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
+  getAlbumTracks: (ratingKey: string) => request<TrackOut[]>(`/api/plex/album/${ratingKey}/tracks`),
   plexImageUrl: (path: string) => `/api/plex/image?path=${encodeURIComponent(path)}`,
 
   scanPlexGaps: (limitArtists?: number) =>

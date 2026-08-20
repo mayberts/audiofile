@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes } from "react-router-dom";
+import AlbumDetailPage from "./pages/AlbumDetailPage";
 import ArtistDetailPage from "./pages/ArtistDetailPage";
 import DownloadsPage from "./pages/DownloadsPage";
 import LibraryPage from "./pages/LibraryPage";
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/" element={<SearchPage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/library/:artist" element={<ArtistDetailPage />} />
+          <Route path="/library/:artist/:album" element={<AlbumDetailPage />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/wanted" element={<WantedPage />} />
           <Route path="/plex" element={<PlexGapsPage />} />

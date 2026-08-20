@@ -83,6 +83,13 @@ class LibraryAlbumOut(BaseModel):
     thumb: Optional[str] = None
     year: Optional[int] = None
     track_count: Optional[int] = None
+    rating_key: Optional[str] = None
+
+
+class TrackOut(BaseModel):
+    title: str
+    track_number: Optional[int] = None
+    duration_ms: Optional[int] = None
 
 
 class PlexGapOut(BaseModel):

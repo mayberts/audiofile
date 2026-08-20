@@ -84,7 +84,10 @@ function AlbumCard({ album }: { album: LibraryAlbumOut }) {
   const showImage = album.thumb && !imgFailed;
 
   return (
-    <div className="artist-card">
+    <Link
+      className="artist-card"
+      to={`/library/${encodeURIComponent(album.artist)}/${encodeURIComponent(album.album)}`}
+    >
       {showImage ? (
         <img
           src={api.plexImageUrl(album.thumb!)}
@@ -101,6 +104,6 @@ function AlbumCard({ album }: { album: LibraryAlbumOut }) {
           {album.year ?? "—"} · {album.track_count ?? "—"} track{album.track_count === 1 ? "" : "s"}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

@@ -54,6 +54,21 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
                     "thumb": getattr(album, "thumb", None),
                     "year": album.year,
                     "track_count": getattr(album, "leafCount", None),
+                    "rating_key": str(album.ratingKey),
                 }
             )
     return albums
+
+
+def get_album_tracks(plex: PlexServer, rating_key: str) -> list[dict]:
+    album = plex.fetchItem(int(rating_key))
+    tracks = []
+    for track in album.tracks():
+        tracks.append(
+            {
+                "title": track.title,
+                "track_number": track.index,
+                "duration_ms": track.duration,
+            }
+        )
+    return tracks

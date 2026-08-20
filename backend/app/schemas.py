@@ -114,6 +114,21 @@ class MissingTrackOut(BaseModel):
     disc: Optional[int] = None
 
 
+class PosterOut(BaseModel):
+    key: str
+    thumb: Optional[str] = None
+    provider: Optional[str] = None
+    selected: bool = False
+
+
+class SelectPosterRequest(BaseModel):
+    poster_key: str
+
+
+class PosterResultOut(BaseModel):
+    thumb: Optional[str] = None
+
+
 class TrackCheckOut(BaseModel):
     checked: bool
     expected_total: Optional[int] = None

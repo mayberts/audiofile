@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, LibraryAlbumOut, MissingTrackOut, TrackCheckOut, TrackOut } from "../api/client";
+import ArtworkPicker from "../components/ArtworkPicker";
 import { libraryStore } from "../libraryStore";
 
 function formatDuration(ms: number | null): string {
@@ -38,6 +39,19 @@ export default function AlbumDetailPage() {
     [albums, artistName, albumName],
   );
 
+  const [thumbOverride, setThumbOverride] = useState<string | null>(null);
+  const [showArtworkPicker, setShowArtworkPicker] = useState(false);
+  const displayThumb = thumbOverride ?? albumEntry?.thumb ?? null;
+
+  function onArtworkChanged(thumb: string | null) {
+    setThumbOverride(thumb);
+    if (libraryStore.albums) {
+      libraryStore.albums = libraryStore.albums.map((a) =>
+        a.artist === artistName && a.album === albumName ? { ...a, thumb } : a,
+      );
+    }
+  }
+
   useEffect(() => {
     if (!albumEntry?.rating_key) return;
     setLoadingTracks(true);
@@ -58,12 +72,28 @@ export default function AlbumDetailPage() {
       </p>
 
       <div className="row" style={{ alignItems: "center", marginBottom: "1rem", gap: "1rem" }}>
-        {albumEntry?.thumb && (
-          <img
-            src={api.plexImageUrl(albumEntry.thumb)}
-            alt={albumName}
-            style={{ width: 96, height: 96, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-          />
+        {albumEntry?.rating_key && (
+          <button
+            className="image-edit-trigger"
+            onClick={() => setShowArtworkPicker(true)}
+            title="Change artwork"
+          >
+            {displayThumb ? (
+              <img
+                src={api.plexImageUrl(displayThumb)}
+                alt={albumName}
+                style={{ width: 96, height: 96, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+              />
+            ) : (
+              <div
+                className="artist-card-fallback"
+                style={{ width: 96, height: 96, borderRadius: 8, fontSize: "1.6rem" }}
+              >
+                {albumName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="image-edit-overlay">Edit</div>
+          </button>
         )}
         <div>
           <h1 style={{ margin: 0 }}>{albumName}</h1>
@@ -111,6 +141,14 @@ export default function AlbumDetailPage() {
 
       {albumEntry && tracks && tracks.length > 0 && (
         <MissingTracksPanel artist={artistName} ratingKey={albumEntry.rating_key ?? ""} />
+      )}
+
+      {showArtworkPicker && albumEntry?.rating_key && (
+        <ArtworkPicker
+          ratingKey={albumEntry.rating_key}
+          onClose={() => setShowArtworkPicker(false)}
+          onChanged={onArtworkChanged}
+        />
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
+import ArtworkPicker from "../components/ArtworkPicker";
 import { libraryStore } from "../libraryStore";
 
 export default function ArtistDetailPage() {
@@ -31,9 +32,20 @@ export default function ArtistDetailPage() {
       .sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || a.album.localeCompare(b.album));
   }, [albums, artistName]);
 
-  const artistThumb = artistAlbums.find((a) => a.artist_thumb)?.artist_thumb ?? null;
+  const [artistThumbOverride, setArtistThumbOverride] = useState<string | null>(null);
+  const artistThumb = artistThumbOverride ?? artistAlbums.find((a) => a.artist_thumb)?.artist_thumb ?? null;
   const artistRatingKey = artistAlbums.find((a) => a.artist_rating_key)?.artist_rating_key ?? null;
   const totalTracks = artistAlbums.reduce((sum, a) => sum + (a.track_count ?? 0), 0);
+  const [showArtworkPicker, setShowArtworkPicker] = useState(false);
+
+  function onArtworkChanged(thumb: string | null) {
+    setArtistThumbOverride(thumb);
+    if (libraryStore.albums) {
+      libraryStore.albums = libraryStore.albums.map((a) =>
+        a.artist === artistName ? { ...a, artist_thumb: thumb } : a,
+      );
+    }
+  }
 
   const [bio, setBio] = useState<string | null>(null);
   useEffect(() => {
@@ -70,12 +82,28 @@ export default function ArtistDetailPage() {
       </p>
 
       <div className="row" style={{ alignItems: "center", marginBottom: "1rem", gap: "1rem" }}>
-        {artistThumb && (
-          <img
-            src={api.plexImageUrl(artistThumb)}
-            alt={artistName}
-            style={{ width: 72, height: 72, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-          />
+        {artistRatingKey && (
+          <button
+            className="image-edit-trigger"
+            onClick={() => setShowArtworkPicker(true)}
+            title="Change artwork"
+          >
+            {artistThumb ? (
+              <img
+                src={api.plexImageUrl(artistThumb)}
+                alt={artistName}
+                style={{ width: 72, height: 72, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+              />
+            ) : (
+              <div
+                className="artist-card-fallback"
+                style={{ width: 72, height: 72, borderRadius: 8, fontSize: "1.4rem" }}
+              >
+                {artistName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="image-edit-overlay">Edit</div>
+          </button>
         )}
         <div>
           <h1 style={{ margin: 0 }}>{artistName}</h1>
@@ -129,6 +157,14 @@ export default function ArtistDetailPage() {
             <MissingAlbumsTable artist={artistName} albums={missingAlbums} />
           )}
         </>
+      )}
+
+      {showArtworkPicker && artistRatingKey && (
+        <ArtworkPicker
+          ratingKey={artistRatingKey}
+          onClose={() => setShowArtworkPicker(false)}
+          onChanged={onArtworkChanged}
+        />
       )}
     </div>
   );

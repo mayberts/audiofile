@@ -1,17 +1,37 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
-from ..clients.plex import PlexNotConfigured, get_album_tracks, get_artist_bio, get_library_albums, get_plex_server
+from ..clients.plex import (
+    PlexNotConfigured,
+    get_album_tracks,
+    get_artist_bio,
+    get_item_posters,
+    get_library_albums,
+    get_plex_server,
+    select_item_poster,
+    upload_item_poster,
+)
 from ..config import get_settings
 from ..database import get_session
 from ..models import LibraryAlbum, WantedItem, WantedSource
-from ..schemas import AddMissingAlbumRequest, LibraryAlbumOut, MissingAlbumOut, TrackCheckOut, TrackOut, WantedOut
+from ..schemas import (
+    AddMissingAlbumRequest,
+    LibraryAlbumOut,
+    MissingAlbumOut,
+    PosterOut,
+    PosterResultOut,
+    SelectPosterRequest,
+    TrackCheckOut,
+    TrackOut,
+    WantedOut,
+)
 from ..services.plex_gaps import get_missing_albums_for_artist, get_missing_tracks_for_album
 
 logger = logging.getLogger(__name__)
@@ -140,11 +160,84 @@ def get_album_track_check(rating_key: str):
         mb.close()
 
 
+@router.get("/item/{rating_key}/posters", response_model=list[PosterOut])
+def get_item_posters_endpoint(rating_key: str):
+    """Works for either an artist or an album ratingKey — Plex treats both
+    as plain library items, and posters() returns candidates its music
+    metadata agent already found plus anything previously uploaded."""
+    settings = get_settings()
+    try:
+        plex = get_plex_server(settings)
+        return get_item_posters(plex, rating_key)
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not load artwork options: {exc}") from exc
+
+
+@router.post("/item/{rating_key}/poster/select", response_model=PosterResultOut)
+def select_item_poster_endpoint(
+    rating_key: str, payload: SelectPosterRequest, session: Session = Depends(get_session)
+):
+    settings = get_settings()
+    try:
+        plex = get_plex_server(settings)
+        thumb = select_item_poster(plex, rating_key, payload.poster_key)
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not set artwork: {exc}") from exc
+    _sync_library_thumb(session, rating_key, thumb)
+    return {"thumb": thumb}
+
+
+@router.post("/item/{rating_key}/poster/upload", response_model=PosterResultOut)
+async def upload_item_poster_endpoint(
+    rating_key: str,
+    url: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    session: Session = Depends(get_session),
+):
+    settings = get_settings()
+    try:
+        plex = get_plex_server(settings)
+        file_bytes = await file.read() if file is not None else None
+        thumb = upload_item_poster(plex, rating_key, url=url or None, file_bytes=file_bytes)
+    except PlexNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Could not upload artwork: {exc}") from exc
+    _sync_library_thumb(session, rating_key, thumb)
+    return {"thumb": thumb}
+
+
+def _sync_library_thumb(session: Session, rating_key: str, thumb: Optional[str]) -> None:
+    """Keeps the persisted Library snapshot in step with an artwork change
+    (either an artist or an album ratingKey) so it shows up right away
+    instead of waiting for the next full 'Scan Plex Library'."""
+    if thumb is None:
+        return
+    for row in session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).all():
+        row.thumb = thumb
+        session.add(row)
+    for row in session.exec(select(LibraryAlbum).where(LibraryAlbum.artist_rating_key == rating_key)).all():
+        row.artist_thumb = thumb
+        session.add(row)
+    session.commit()
+
+
 @router.get("/image")
 def get_image(path: str):
     """Proxies artwork from Plex so the browser never sees the Plex token —
-    library listings only hand out these Plex-relative paths, not full URLs."""
-    if not path.startswith("/library/"):
+    library listings only hand out these Plex-relative paths, not full URLs.
+    Posters from posters() can come back as any Plex-internal path (not
+    just /library/...), so this only guards against being handed a
+    protocol-relative or absolute external URL, not a specific prefix."""
+    if not path.startswith("/") or path.startswith("//"):
         raise HTTPException(status_code=400, detail="invalid image path")
 
     settings = get_settings()

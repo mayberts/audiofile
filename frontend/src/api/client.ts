@@ -92,6 +92,17 @@ export interface TrackCheckOut {
   missing_tracks: MissingTrackOut[];
 }
 
+export interface PosterOut {
+  key: string;
+  thumb: string | null;
+  provider: string | null;
+  selected: boolean;
+}
+
+export interface PosterResultOut {
+  thumb: string | null;
+}
+
 export interface ConnectionTestResult {
   connected: boolean;
   detail: string | null;
@@ -120,6 +131,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${init?.method || "GET"} ${path} failed (${res.status}): ${body}`);
   }
   if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+// Separate from request(): a multipart body needs the browser to set its
+// own Content-Type (with the boundary), so it can't go through the
+// JSON-only helper above.
+async function requestForm<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(path, { method: "POST", body: formData });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`POST ${path} failed (${res.status}): ${body}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -173,6 +196,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(params),
     }),
+
+  getItemPosters: (ratingKey: string) => request<PosterOut[]>(`/api/plex/item/${ratingKey}/posters`),
+  selectItemPoster: (ratingKey: string, posterKey: string) =>
+    request<PosterResultOut>(`/api/plex/item/${ratingKey}/poster/select`, {
+      method: "POST",
+      body: JSON.stringify({ poster_key: posterKey }),
+    }),
+  uploadItemPosterUrl: (ratingKey: string, url: string) => {
+    const form = new FormData();
+    form.append("url", url);
+    return requestForm<PosterResultOut>(`/api/plex/item/${ratingKey}/poster/upload`, form);
+  },
+  uploadItemPosterFile: (ratingKey: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return requestForm<PosterResultOut>(`/api/plex/item/${ratingKey}/poster/upload`, form);
+  },
 
   getSettings: () => request<SettingsOut>("/api/settings"),
   updateSettings: (patch: Partial<SettingsOut>) =>

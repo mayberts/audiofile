@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from typing import Optional
 
 from plexapi.server import PlexServer
@@ -70,6 +71,48 @@ def get_artist_item(plex: PlexServer, rating_key: str):
 def get_artist_bio(plex: PlexServer, rating_key: str) -> str:
     artist = get_artist_item(plex, rating_key)
     return getattr(artist, "summary", None) or ""
+
+
+def get_item_posters(plex: PlexServer, rating_key: str) -> list[dict]:
+    """Artists and albums are both plain Plex library items keyed by
+    ratingKey, so this works for either without needing to know which kind
+    it is. Plex's own posters() call is itself a "search a source" —  it
+    returns every candidate its music metadata agent already found, plus
+    anything previously uploaded, not just the currently-selected one."""
+    item = plex.fetchItem(int(rating_key))
+    return [
+        {
+            "key": p.ratingKey,
+            "thumb": p.thumb,
+            "provider": p.provider,
+            "selected": bool(p.selected),
+        }
+        for p in item.posters()
+    ]
+
+
+def select_item_poster(plex: PlexServer, rating_key: str, poster_key: str) -> Optional[str]:
+    item = plex.fetchItem(int(rating_key))
+    for p in item.posters():
+        if p.ratingKey == poster_key:
+            p.select()
+            item.reload()
+            return getattr(item, "thumb", None)
+    raise ValueError("poster not found")
+
+
+def upload_item_poster(
+    plex: PlexServer, rating_key: str, *, url: Optional[str] = None, file_bytes: Optional[bytes] = None
+) -> Optional[str]:
+    item = plex.fetchItem(int(rating_key))
+    if url:
+        item.uploadPoster(url=url)
+    elif file_bytes is not None:
+        item.uploadPoster(filepath=io.BytesIO(file_bytes))
+    else:
+        raise ValueError("no image or url provided")
+    item.reload()
+    return getattr(item, "thumb", None)
 
 
 def get_album_tracks(plex: PlexServer, rating_key: str) -> list[dict]:

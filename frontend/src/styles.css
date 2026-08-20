@@ -325,3 +325,97 @@ form.inline {
   font-size: 0.82rem;
   color: var(--muted);
 }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1.5rem;
+}
+
+.modal-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 0.6rem;
+}
+
+.poster-option {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  border: 2px solid var(--border);
+}
+
+.poster-option img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.poster-option-selected {
+  border-color: var(--accent);
+}
+
+.poster-option-busy {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+}
+
+.image-edit-trigger {
+  position: relative;
+  display: inline-block;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.image-edit-trigger img,
+.image-edit-trigger .artist-card-fallback {
+  display: block;
+}
+
+.image-edit-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.image-edit-trigger:hover .image-edit-overlay {
+  opacity: 1;
+}

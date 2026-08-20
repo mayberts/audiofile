@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, PosterOut } from "../api/client";
 
+// Candidates Plex's metadata agent found but hasn't downloaded/cached yet
+// (i.e. anything other than the currently-selected poster) come back with
+// thumb already pointing straight at the external source — our own-host
+// proxy only knows how to fetch Plex-relative paths, so those go through
+// the browser directly instead of being routed through it.
+function posterImageSrc(thumb: string): string {
+  return /^https?:\/\//i.test(thumb) ? thumb : api.plexImageUrl(thumb);
+}
+
 interface ArtworkPickerProps {
   ratingKey: string;
   onClose: () => void;
@@ -97,7 +106,7 @@ export default function ArtworkPicker({ ratingKey, onClose, onChanged }: Artwork
                 title={p.provider || undefined}
               >
                 {p.thumb ? (
-                  <img src={api.plexImageUrl(p.thumb)} alt="" loading="lazy" />
+                  <img src={posterImageSrc(p.thumb)} alt="" loading="lazy" />
                 ) : (
                   <div className="artist-card-fallback">?</div>
                 )}

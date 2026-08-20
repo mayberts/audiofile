@@ -65,13 +65,3 @@ class DownloadRecord(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class PlexMissingAlbum(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    artist: str
-    album: str
-    release_group_mbid: Optional[str] = None
-    first_release_date: Optional[str] = None
-    added_to_wanted: bool = False
-    checked_at: datetime = Field(default_factory=datetime.utcnow)

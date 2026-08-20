@@ -73,13 +73,10 @@ export interface TrackOut {
   duration_ms: number | null;
 }
 
-export interface PlexGapOut {
-  id: number;
-  artist: string;
+export interface MissingAlbumOut {
   album: string;
   release_group_mbid: string | null;
   first_release_date: string | null;
-  added_to_wanted: boolean;
 }
 
 export interface ConnectionTestResult {
@@ -151,14 +148,13 @@ export const api = {
     request<{ summary: string }>(`/api/plex/artist/${ratingKey}/bio`),
   plexImageUrl: (path: string) => `/api/plex/image?path=${encodeURIComponent(path)}`,
 
-  scanPlexGaps: (limitArtists?: number) =>
-    request<{ status: string }>(
-      `/api/plex/scan${limitArtists ? `?limit_artists=${limitArtists}` : ""}`,
-      { method: "POST" },
-    ),
-  listPlexGaps: () => request<PlexGapOut[]>("/api/plex/gaps"),
-  addGapToWanted: (id: number) =>
-    request<PlexGapOut>(`/api/plex/gaps/${id}/add-to-wanted`, { method: "POST" }),
+  getMissingAlbums: (artistRatingKey: string) =>
+    request<MissingAlbumOut[]>(`/api/plex/artist/${artistRatingKey}/missing-albums`),
+  addMissingAlbumToWanted: (params: { artist: string; album: string; release_group_mbid?: string | null }) =>
+    request<WantedOut>("/api/plex/missing-album/add-to-wanted", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 
   getSettings: () => request<SettingsOut>("/api/settings"),
   updateSettings: (patch: Partial<SettingsOut>) =>

@@ -4,13 +4,13 @@ A self-hosted Soulseek music downloader — search, grab, auto-tag, and organize
 built as a replacement for tools like Dropped Needle / SoulSync.
 
 - **Search & download** tracks and albums from Soulseek through a web UI.
-- **Library**: a browsable, filterable listing of every artist/album already
-  in your Plex music library, pulled straight from Plex.
+- **Library**: browse your Plex music library — artists, then their albums,
+  then track listings, with cover art and bios pulled straight from Plex.
+  Each artist page also checks MusicBrainz live for studio albums you don't
+  have yet, right alongside the ones you do — one click adds a missing one
+  to the wanted list.
 - **Wanted list** (Lidarr-style): add an artist/album/track, and a background
   job periodically searches Soulseek for it and grabs the best match.
-- **Plex gap-fill**: scans your existing Plex music library, compares each
-  artist's discography against MusicBrainz, and lists studio albums you don't
-  have yet — one click adds them to the wanted list.
 - **Metadata & cover art**: every completed download is tagged (artist,
   album, title, track number, year) and embedded with cover art from
   MusicBrainz / the Cover Art Archive, then moved into an
@@ -24,12 +24,12 @@ slskd (Soulseek client/daemon, REST API) — you bring your own, already running
 backend (FastAPI + SQLite)
    - clients/    slskd, MusicBrainz, Plex
    - services/   search scoring, tagging (mutagen), library organizer,
-                 wanted-list processing, Plex gap scanning
+                 wanted-list processing, per-artist MusicBrainz gap check
    - scheduler   polls active downloads, post-processes completed ones,
                  periodically works the wanted list
    ↑
 frontend (React + Vite, served by nginx)
-   - Search, Downloads, Wanted, Plex Gaps, Settings pages
+   - Search, Library (+ artist/album detail), Downloads, Wanted, Settings
 ```
 
 Soulseek connectivity is handled entirely by [slskd](https://github.com/slskd/slskd),
@@ -111,14 +111,18 @@ configured formats, minimum bitrate, and free upload slots), and enqueues the
 best match. Once slskd reports the transfer complete, the backend tags the
 file with MusicBrainz metadata + cover art and moves it into the library.
 
-## How Plex gap-fill works
+## How the Library's missing-albums check works
 
-The scan walks every artist in your Plex music library, looks them up on
-MusicBrainz, and diffs their official studio album list against what you
-already have (by album title). Anything missing is listed on the **Plex
-Gaps** page; "Add to Wanted" queues it for the wanted-list job above. Live
-compilations, remixes, and other secondary release types are excluded by
-default to keep the list focused on studio albums.
+Opening an artist's page in **Library** looks that artist up on MusicBrainz
+and diffs their official studio album list against what you already have
+(by album title, normalized to ignore punctuation/apostrophe differences
+and edition-suffix variants like "(Deluxe Edition)"). This happens live,
+just for that one artist — two MusicBrainz requests, a second or so — not a
+whole-library background scan. Anything missing shows up right under your
+existing albums for that artist; "Add to Wanted" queues it for the
+wanted-list job above. Live albums, compilations, remixes, and other
+secondary release types are excluded by default to keep the list focused on
+studio albums.
 
 ## Local development (without Docker)
 
@@ -154,8 +158,8 @@ change before it's published), run `docker build -t audiofile-backend
 
 - Tagging supports MP3, FLAC, and M4A/AAC; other formats are moved into the
   library untagged.
-- Plex gap scanning matches albums by title only (no MBID-based dedup on the
-  Plex side), so slightly different album title formatting can produce false
-  positives — review the list before bulk-adding to wanted.
+- The missing-albums check matches by (normalized) title only, no MBID-based
+  dedup on the Plex side, so an unusually reworded title can still slip
+  through as a false positive — review before adding to wanted.
 - No authentication on the web UI itself; put it behind a reverse proxy or
   your home network's edge if exposing it beyond localhost.

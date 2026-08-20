@@ -3,7 +3,6 @@ import AlbumDetailPage from "./pages/AlbumDetailPage";
 import ArtistDetailPage from "./pages/ArtistDetailPage";
 import DownloadsPage from "./pages/DownloadsPage";
 import LibraryPage from "./pages/LibraryPage";
-import PlexGapsPage from "./pages/PlexGapsPage";
 import SearchPage from "./pages/SearchPage";
 import SettingsPage from "./pages/SettingsPage";
 import WantedPage from "./pages/WantedPage";
@@ -13,7 +12,6 @@ const links = [
   { to: "/library", label: "Library" },
   { to: "/downloads", label: "Downloads" },
   { to: "/wanted", label: "Wanted" },
-  { to: "/plex", label: "Plex Gaps" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -38,7 +36,6 @@ export default function App() {
           <Route path="/library/:artist/:album" element={<AlbumDetailPage />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/wanted" element={<WantedPage />} />
-          <Route path="/plex" element={<PlexGapsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

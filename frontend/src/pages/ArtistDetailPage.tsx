@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, LibraryAlbumOut } from "../api/client";
+import { api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
 import { libraryStore } from "../libraryStore";
 
 export default function ArtistDetailPage() {
@@ -45,6 +45,21 @@ export default function ArtistDetailPage() {
       .catch(() => setBio(null));
   }, [artistRatingKey]);
 
+  const [missingAlbums, setMissingAlbums] = useState<MissingAlbumOut[] | null>(null);
+  const [missingLoading, setMissingLoading] = useState(false);
+  const [missingError, setMissingError] = useState<string | null>(null);
+  useEffect(() => {
+    setMissingAlbums(null);
+    setMissingError(null);
+    if (!artistRatingKey) return;
+    setMissingLoading(true);
+    api
+      .getMissingAlbums(artistRatingKey)
+      .then(setMissingAlbums)
+      .catch((err) => setMissingError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setMissingLoading(false));
+  }, [artistRatingKey]);
+
   return (
     <div>
       <p style={{ marginBottom: "0.8rem" }}>
@@ -77,17 +92,87 @@ export default function ArtistDetailPage() {
       {loading && <div className="panel">Loading...</div>}
       {error && <div className="panel error-text">{error}</div>}
 
-      {!loading && !error && artistAlbums.length === 0 && (
-        <div className="panel empty">No albums found for this artist.</div>
-      )}
+      {!loading && !error && (
+        <>
+          <h2>Your Albums</h2>
+          {artistAlbums.length === 0 ? (
+            <div className="panel empty">No albums found for this artist.</div>
+          ) : (
+            <div className="artist-grid">
+              {artistAlbums.map((a) => (
+                <AlbumCard key={a.album} album={a} />
+              ))}
+            </div>
+          )}
 
-      {artistAlbums.length > 0 && (
-        <div className="artist-grid">
-          {artistAlbums.map((a) => (
-            <AlbumCard key={a.album} album={a} />
-          ))}
-        </div>
+          <h2 style={{ marginTop: "1.5rem" }}>Missing Albums</h2>
+          {missingLoading && <div className="panel">Checking MusicBrainz...</div>}
+          {missingError && <div className="panel error-text">{missingError}</div>}
+          {!missingLoading && !missingError && missingAlbums && missingAlbums.length === 0 && (
+            <div className="panel empty">Nothing missing — you have every studio album MusicBrainz knows about.</div>
+          )}
+          {missingAlbums && missingAlbums.length > 0 && (
+            <MissingAlbumsTable artist={artistName} albums={missingAlbums} />
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function MissingAlbumsTable({ artist, albums }: { artist: string; albums: MissingAlbumOut[] }) {
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onAdd(album: MissingAlbumOut) {
+    setPending(album.album);
+    setError(null);
+    try {
+      await api.addMissingAlbumToWanted({
+        artist,
+        album: album.album,
+        release_group_mbid: album.release_group_mbid,
+      });
+      setAdded((prev) => new Set(prev).add(album.album));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div className="panel">
+      {error && <div className="error-text" style={{ marginBottom: "0.6rem" }}>{error}</div>}
+      <table>
+        <thead>
+          <tr>
+            <th>Album</th>
+            <th>Released</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...albums]
+            .sort((a, b) => (a.first_release_date ?? "").localeCompare(b.first_release_date ?? ""))
+            .map((a) => (
+              <tr key={a.album}>
+                <td>{a.album}</td>
+                <td className="muted">{a.first_release_date || "—"}</td>
+                <td>
+                  {added.has(a.album) ? (
+                    <span className="badge downloaded">In wanted list</span>
+                  ) : (
+                    <button className="secondary" onClick={() => onAdd(a)} disabled={pending === a.album}>
+                      {pending === a.album ? "..." : "Add to Wanted"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -63,8 +63,12 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
     return albums
 
 
+def get_artist_item(plex: PlexServer, rating_key: str):
+    return plex.fetchItem(int(rating_key))
+
+
 def get_artist_bio(plex: PlexServer, rating_key: str) -> str:
-    artist = plex.fetchItem(int(rating_key))
+    artist = get_artist_item(plex, rating_key)
     return getattr(artist, "summary", None) or ""
 
 

@@ -93,16 +93,16 @@ class TrackOut(BaseModel):
     duration_ms: Optional[int] = None
 
 
-class PlexGapOut(BaseModel):
-    id: int
-    artist: str
+class MissingAlbumOut(BaseModel):
     album: str
     release_group_mbid: Optional[str] = None
     first_release_date: Optional[str] = None
-    added_to_wanted: bool
 
-    class Config:
-        from_attributes = True
+
+class AddMissingAlbumRequest(BaseModel):
+    artist: str
+    album: str
+    release_group_mbid: Optional[str] = None
 
 
 class TestSlskdRequest(BaseModel):

@@ -143,6 +143,7 @@ export const api = {
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
+  scanLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library/scan", { method: "POST" }),
   getAlbumTracks: (ratingKey: string) => request<TrackOut[]>(`/api/plex/album/${ratingKey}/tracks`),
   getArtistBio: (ratingKey: string) =>
     request<{ summary: string }>(`/api/plex/artist/${ratingKey}/bio`),

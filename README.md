@@ -6,9 +6,11 @@ built as a replacement for tools like Dropped Needle / SoulSync.
 - **Search & download** tracks and albums from Soulseek through a web UI.
 - **Library**: browse your Plex music library — artists, then their albums,
   then track listings, with cover art and bios pulled straight from Plex.
-  Each artist page also checks MusicBrainz live for studio albums you don't
-  have yet, right alongside the ones you do — one click adds a missing one
-  to the wanted list.
+  The listing is persisted in the database and only refreshed when you
+  click "Scan Plex Library", so loading the page never re-walks your whole
+  Plex library. Each artist page also checks MusicBrainz live for studio
+  albums you don't have yet, right alongside the ones you do — one click
+  adds a missing one to the wanted list.
 - **Wanted list** (Lidarr-style): add an artist/album/track, and a background
   job periodically searches Soulseek for it and grabs the best match.
 - **Metadata & cover art**: every completed download is tagged (artist,
@@ -69,7 +71,8 @@ them.
      downloads show up there after a Plex library scan.
    - `HOST_APPDATA_DIR` — where audiofile's own database and settings live
      (e.g. `/mnt/user/appdata/audiofile` on Unraid). Back this up; it's the
-     wanted list, download history, and everything set on the Settings page.
+     wanted list, download history, the last scanned Plex library snapshot,
+     and everything set on the Settings page.
 
 2. Start everything:
 

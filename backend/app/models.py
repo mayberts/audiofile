@@ -35,6 +35,22 @@ class WantedItem(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class LibraryAlbum(SQLModel, table=True):
+    """A persisted snapshot of the Plex library, refreshed only when the
+    user explicitly rescans — so loading the Library page is a fast DB read
+    instead of a live Plex walk on every visit."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    artist: str
+    artist_thumb: Optional[str] = None
+    artist_rating_key: Optional[str] = None
+    album: str
+    thumb: Optional[str] = None
+    year: Optional[int] = None
+    track_count: Optional[int] = None
+    rating_key: Optional[str] = None
+
+
 class DownloadStatus(str, Enum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"

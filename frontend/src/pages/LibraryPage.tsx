@@ -74,6 +74,20 @@ export default function LibraryPage() {
     }
   }
 
+  async function rescan() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.scanLibrary();
+      libraryStore.albums = data;
+      setAlbums(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (libraryStore.albums === null) {
       load();
@@ -101,7 +115,7 @@ export default function LibraryPage() {
           onChange={(e) => setFilter(e.target.value)}
           style={{ flex: 1 }}
         />
-        <button className="secondary" onClick={load} disabled={loading}>
+        <button className="secondary" onClick={rescan} disabled={loading}>
           {loading ? "Scanning..." : "Scan Plex Library"}
         </button>
       </div>
@@ -119,7 +133,9 @@ export default function LibraryPage() {
       {!albums && !loading && !error && <div className="panel empty">Nothing loaded yet.</div>}
       {albums && filtered.length === 0 && (
         <div className="panel empty">
-          {artists.length === 0 ? "No albums found in your Plex music library." : "No artists match that filter."}
+          {artists.length === 0
+            ? 'Nothing scanned yet — click "Scan Plex Library" above.'
+            : "No artists match that filter."}
         </div>
       )}
 

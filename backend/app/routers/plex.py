@@ -4,13 +4,13 @@ import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.plex import PlexNotConfigured, get_album_tracks, get_artist_bio, get_library_albums, get_plex_server
 from ..config import get_settings
 from ..database import get_session
-from ..models import WantedItem, WantedSource
+from ..models import LibraryAlbum, WantedItem, WantedSource
 from ..schemas import AddMissingAlbumRequest, LibraryAlbumOut, MissingAlbumOut, TrackOut, WantedOut
 from ..services.plex_gaps import get_missing_albums_for_artist
 
@@ -20,15 +20,36 @@ router = APIRouter(prefix="/api/plex", tags=["plex"])
 
 
 @router.get("/library", response_model=list[LibraryAlbumOut])
-def get_library():
+def get_library(session: Session = Depends(get_session)):
+    """Reads the persisted snapshot from the last scan — a fast DB read, no
+    Plex call. Returns an empty list if the library has never been scanned."""
+    return session.exec(select(LibraryAlbum).order_by(LibraryAlbum.artist, LibraryAlbum.album)).all()
+
+
+@router.post("/library/scan", response_model=list[LibraryAlbumOut])
+def scan_library(session: Session = Depends(get_session)):
+    """The only thing that actually talks to Plex for the library listing —
+    fetches fresh, replaces the persisted snapshot wholesale, and returns it."""
     settings = get_settings()
     try:
         plex = get_plex_server(settings)
-        return get_library_albums(plex)
+        albums = get_library_albums(plex)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not load Plex library: {exc}") from exc
+
+    for row in session.exec(select(LibraryAlbum)).all():
+        session.delete(row)
+    session.commit()
+
+    rows = [LibraryAlbum(**album) for album in albums]
+    session.add_all(rows)
+    session.commit()
+    for row in rows:
+        session.refresh(row)
+    rows.sort(key=lambda r: (r.artist, r.album))
+    return rows
 
 
 @router.get("/artist/{rating_key}/bio")

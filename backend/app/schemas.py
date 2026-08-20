@@ -86,6 +86,9 @@ class LibraryAlbumOut(BaseModel):
     track_count: Optional[int] = None
     rating_key: Optional[str] = None
 
+    class Config:
+        from_attributes = True
+
 
 class TrackOut(BaseModel):
     title: str

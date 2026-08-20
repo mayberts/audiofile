@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, LibraryAlbumOut } from "../api/client";
 
+// Module-level cache so the list survives navigating away and back — React
+// Router unmounts this component on route change, which would otherwise
+// throw away the fetched data and force a full Plex re-scan on every visit.
+let libraryCache: LibraryAlbumOut[] | null = null;
+
 export default function LibraryPage() {
-  const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(null);
+  const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryCache);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,6 +18,7 @@ export default function LibraryPage() {
     try {
       const data = await api.getLibrary();
       data.sort((a, b) => a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album));
+      libraryCache = data;
       setAlbums(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -22,7 +28,12 @@ export default function LibraryPage() {
   }
 
   useEffect(() => {
-    load();
+    // Only auto-fetch the first time this page is ever visited in a
+    // session — on later visits the cached list above is shown instantly,
+    // and "Scan Plex Library" is there for an explicit refresh.
+    if (libraryCache === null) {
+      load();
+    }
   }, []);
 
   const filtered = useMemo(() => {

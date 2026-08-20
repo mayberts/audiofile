@@ -22,15 +22,23 @@ export default function DownloadsPage() {
   }, []);
 
   async function onCancel(id: number) {
-    await api.cancelDownload(id);
-    refresh();
+    try {
+      await api.cancelDownload(id);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   const hasCompleted = downloads.some((d) => ["done", "failed", "cancelled"].includes(d.status));
 
   async function onClearCompleted() {
-    await api.clearCompletedDownloads();
-    refresh();
+    try {
+      await api.clearCompletedDownloads();
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (

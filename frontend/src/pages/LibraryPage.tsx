@@ -95,6 +95,7 @@ export default function LibraryPage() {
   }, []);
 
   const artists = useMemo(() => summarizeByArtist(albums || []), [albums]);
+  const totalTracks = useMemo(() => artists.reduce((sum, a) => sum + a.trackCount, 0), [artists]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -125,7 +126,7 @@ export default function LibraryPage() {
       {albums && (
         <p className="muted" style={{ margin: "0 0 0.6rem" }}>
           {albums.length} album{albums.length === 1 ? "" : "s"} across {artists.length} artist
-          {artists.length === 1 ? "" : "s"}
+          {artists.length === 1 ? "" : "s"} · {totalTracks} track{totalTracks === 1 ? "" : "s"}
           {filter.trim() && ` — ${filtered.length} matching`}
         </p>
       )}

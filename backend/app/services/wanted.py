@@ -25,12 +25,29 @@ def _extract_track_number(filename: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# Soulseek uploads come almost exclusively from Windows clients, so a
+# folder/file name can never literally contain a character Windows forbids
+# in paths — an official title that does (MusicBrainz lists NSYNC's debut
+# as "*NSYNC"; no real upload can be named that, it shows up as "-NSYNC",
+# "NSYNC", etc.) needs that character stripped before it's used as a search
+# term, or slskd's substring search is asking for text no real file has.
+_WINDOWS_INVALID_PATH_CHARS_RE = re.compile(r'[<>:"/\\|?*]')
+
+
+def _search_term(text: str) -> str:
+    # split()+join() rather than a plain strip() collapses the run of
+    # whitespace left behind when a stripped character sat mid-word
+    # ("AC/DC" -> "AC DC", not "AC  DC").
+    return " ".join(_WINDOWS_INVALID_PATH_CHARS_RE.sub(" ", text).split())
+
+
 def _build_query(item: WantedItem) -> str:
+    artist = _search_term(item.artist)
     if item.track:
-        return f"{item.artist} {item.track}"
+        return f"{artist} {_search_term(item.track)}"
     if item.album:
-        return f"{item.artist} {item.album}"
-    return item.artist
+        return f"{artist} {_search_term(item.album)}"
+    return artist
 
 
 def process_wanted_item(

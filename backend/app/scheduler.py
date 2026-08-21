@@ -22,6 +22,9 @@ def poll_downloads_job() -> None:
     settings = get_settings()
     slskd = SlskdClient.from_settings(settings)
     mb = MusicBrainzClient(settings)
+    # Shared across every record processed this tick so an album batch's
+    # tracks reuse one MusicBrainz release lookup instead of one each.
+    release_cache: dict = {}
     try:
         with Session(engine) as session:
             downloads_service.sync_transfer_status(session, slskd)
@@ -30,7 +33,7 @@ def poll_downloads_job() -> None:
                 select(DownloadRecord).where(DownloadRecord.status == DownloadStatus.COMPLETED)
             ).all()
             for record in completed:
-                downloads_service.process_completed_download(session, record, settings, mb)
+                downloads_service.process_completed_download(session, record, settings, mb, release_cache)
     except Exception:  # noqa: BLE001
         logger.exception("poll_downloads_job failed")
     finally:

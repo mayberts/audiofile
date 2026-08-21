@@ -30,6 +30,20 @@ export default function DownloadsPage() {
     }
   }
 
+  const [retrying, setRetrying] = useState<number | null>(null);
+
+  async function onRetry(id: number) {
+    setRetrying(id);
+    try {
+      await api.retryDownload(id);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRetrying(null);
+    }
+  }
+
   const hasCompleted = downloads.some((d) => ["done", "failed", "cancelled"].includes(d.status));
 
   async function onClearCompleted() {
@@ -75,6 +89,7 @@ export default function DownloadsPage() {
                 // so fall back to the actual filename before the album name.
                 const label = [d.hint_artist, d.hint_track || name || d.hint_album].filter(Boolean).join(" — ");
                 const cancellable = d.status === "queued" || d.status === "in_progress";
+                const retryable = d.status === "failed";
                 return (
                   <tr key={d.id}>
                     <td>
@@ -97,6 +112,16 @@ export default function DownloadsPage() {
                       {cancellable && (
                         <button className="secondary" onClick={() => onCancel(d.id)}>
                           Cancel
+                        </button>
+                      )}
+                      {retryable && (
+                        <button
+                          className="secondary"
+                          onClick={() => onRetry(d.id)}
+                          disabled={retrying === d.id}
+                          title="Re-run tagging/organizing without re-downloading — the file already landed, only this step failed."
+                        >
+                          {retrying === d.id ? "Retrying..." : "Retry"}
                         </button>
                       )}
                     </td>

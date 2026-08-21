@@ -3,11 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import get_settings
 from ..database import get_session
 from ..models import DownloadRecord, DownloadStatus
 from ..schemas import DownloadOut
+from ..services import downloads as downloads_service
 
 router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 
@@ -29,6 +31,30 @@ def clear_completed_downloads(session: Session = Depends(get_session)):
         session.delete(record)
     session.commit()
     return {"cleared": len(records)}
+
+
+@router.post("/{download_id}/retry", response_model=DownloadOut)
+def retry_download(download_id: int, session: Session = Depends(get_session)):
+    """For a failed post-processing step (tagging/organizing), not a failed
+    transfer — the file already downloaded fine and is sitting in the
+    download dir, so this just re-runs tagging/organizing against it
+    instead of re-fetching anything from Soulseek. A transient MusicBrainz
+    503 mid-batch is exactly the kind of failure this recovers from without
+    the user needing to re-search."""
+    record = session.get(DownloadRecord, download_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="download not found")
+    if record.status != DownloadStatus.FAILED:
+        raise HTTPException(status_code=400, detail="only failed downloads can be retried")
+
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        downloads_service.process_completed_download(session, record, settings, mb)
+    finally:
+        mb.close()
+    session.refresh(record)
+    return record
 
 
 @router.post("/{download_id}/cancel", response_model=DownloadOut)

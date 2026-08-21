@@ -5,7 +5,7 @@ from pathlib import Path, PureWindowsPath
 
 from sqlmodel import Session, select
 
-from ..clients.musicbrainz import MusicBrainzClient, TrackMetadata
+from ..clients.musicbrainz import MusicBrainzClient, ReleaseMatch, TrackMetadata
 from ..clients.slskd import SlskdClient, find_transfer
 from ..config import Settings
 from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedStatus
@@ -67,17 +67,35 @@ def sync_transfer_status(session: Session, slskd: SlskdClient) -> None:
     session.commit()
 
 
-def resolve_track_metadata(record: DownloadRecord, mb: MusicBrainzClient) -> TrackMetadata:
+def resolve_track_metadata(
+    record: DownloadRecord,
+    mb: MusicBrainzClient,
+    release_cache: dict[tuple[str, str], ReleaseMatch | None] | None = None,
+) -> TrackMetadata:
     if record.hint_album and record.hint_artist:
-        release = mb.search_release(record.hint_artist, record.hint_album)
-        if release:
-            # search_release only returns summary release info — no per-track
-            # listing — so a second lookup is needed to actually get tracks
-            # to match against and to fill in track_number below.
-            full_release = mb.get_release(release.release_mbid)
-            if full_release:
-                release = full_release
+        # An album-batch download produces one DownloadRecord per track, all
+        # sharing the same artist+album — without this cache, tagging a
+        # 13-track album meant 26 serialized MusicBrainz round-trips (two
+        # per track, throttled to ~1/sec) for what's really one release
+        # lookup, which both took ages and made catching a MusicBrainz 503
+        # partway through the batch (failing only some of the tracks) far
+        # more likely than it needs to be.
+        cache_key = (record.hint_artist, record.hint_album)
+        if release_cache is not None and cache_key in release_cache:
+            release = release_cache[cache_key]
+        else:
+            release = mb.search_release(record.hint_artist, record.hint_album)
+            if release:
+                # search_release only returns summary release info — no
+                # per-track listing — so a second lookup is needed to
+                # actually get tracks to match against.
+                full_release = mb.get_release(release.release_mbid)
+                if full_release:
+                    release = full_release
+            if release_cache is not None:
+                release_cache[cache_key] = release
 
+        if release:
             matching_track = None
             if record.hint_track_number is not None:
                 # Album-batch downloads have no single track title to hint
@@ -125,6 +143,7 @@ def process_completed_download(
     record: DownloadRecord,
     settings: Settings,
     mb: MusicBrainzClient,
+    release_cache: dict[tuple[str, str], ReleaseMatch | None] | None = None,
 ) -> None:
     record.status = DownloadStatus.TAGGING
     session.add(record)
@@ -140,7 +159,7 @@ def process_completed_download(
         return
 
     try:
-        meta = resolve_track_metadata(record, mb)
+        meta = resolve_track_metadata(record, mb, release_cache)
         cover_bytes = None
         if meta.release_mbid:
             cover_bytes = mb.get_cover_art(meta.release_mbid)
@@ -156,6 +175,7 @@ def process_completed_download(
         record.mbid = meta.release_mbid
         record.status = DownloadStatus.DONE
         record.progress_percent = 100.0
+        record.error = None  # clear a stale error from an earlier failed attempt (e.g. a retry)
     except Exception as exc:  # noqa: BLE001
         logger.exception("post-processing failed for download %s", record.id)
         record.status = DownloadStatus.FAILED

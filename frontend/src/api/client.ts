@@ -169,6 +169,8 @@ export const api = {
   listDownloads: () => request<DownloadOut[]>("/api/downloads"),
   cancelDownload: (id: number) =>
     request<DownloadOut>(`/api/downloads/${id}/cancel`, { method: "POST" }),
+  retryDownload: (id: number) =>
+    request<DownloadOut>(`/api/downloads/${id}/retry`, { method: "POST" }),
   clearCompletedDownloads: () =>
     request<{ cleared: number }>("/api/downloads/completed", { method: "DELETE" }),
 

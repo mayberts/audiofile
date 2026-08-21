@@ -149,16 +149,20 @@ def process_wanted_item(
         return
 
     username = matches[0].username
-    try:
-        slskd.enqueue_download(username, [{"filename": m.filename, "size": m.size} for m in matches])
-    except SlskdError as exc:
-        item.status = WantedStatus.FAILED
-        item.last_error = str(exc)
-        session.add(item)
-        session.commit()
-        return
-
     is_batch = len(matches) > 1
+
+    # Persisted BEFORE telling slskd to start the transfer, deliberately —
+    # slskd runs the download independently of our own process once it's
+    # told to start, so if audiofile itself gets interrupted (a restart, a
+    # crash) anywhere between the enqueue call succeeding and our own
+    # commit, slskd finishes the download on its own with our database
+    # never having recorded it existed at all: no DownloadRecord means
+    # nothing ever picks it up for tagging or moving into the library,
+    # no matter how long it sits there fully downloaded. Committing these
+    # first means the worst case if something goes wrong right after is a
+    # handful of QUEUED records slskd never actually started — visible and
+    # retryable — instead of a real transfer with zero trace of it here.
+    records: list[DownloadRecord] = []
     for m in matches:
         record = DownloadRecord(
             wanted_item_id=item.id,
@@ -176,11 +180,24 @@ def process_wanted_item(
             status=DownloadStatus.QUEUED,
         )
         session.add(record)
+        records.append(record)
 
     item.status = WantedStatus.DOWNLOADING
     item.last_error = None
     session.add(item)
     session.commit()
+
+    try:
+        slskd.enqueue_download(username, [{"filename": m.filename, "size": m.size} for m in matches])
+    except SlskdError as exc:
+        for record in records:
+            record.status = DownloadStatus.FAILED
+            record.error = str(exc)
+            session.add(record)
+        item.status = WantedStatus.FAILED
+        item.last_error = str(exc)
+        session.add(item)
+        session.commit()
 
 
 def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings) -> int:

@@ -91,13 +91,34 @@ def _peer_priority(sample: SearchFile) -> tuple[bool, int, int]:
     return (sample.slots_free, -(sample.queue_length or 0), sample.upload_speed or 0)
 
 
+def _meets_quality_bar(r: SearchFile, settings: Settings) -> bool:
+    """Whether a file actually satisfies the configured quality preferences
+    (Settings > Preferred formats / Minimum bitrate) — not just scores well
+    on them. score_result() only ever rewards matching those, it never
+    penalizes missing them, so on its own a non-preferred-format file with
+    a great slot/queue/speed could still outscore a preferred-format file
+    with a merely-okay one. Used to filter to a "preferred" pool before
+    ranking by completeness/peer reliability, so e.g. a flac-only setting
+    doesn't quietly get overridden by a faster mp3 peer."""
+    preferred = settings.preferred_format_list
+    if preferred and r.extension not in preferred:
+        return False
+    if r.bitrate is not None and r.bitrate < settings.min_bitrate_kbps:
+        return False
+    return True
+
+
 def best_match(
     results: list[SearchFile], settings: Settings
 ) -> SearchFile | None:
     if not results:
         return None
+    # Prefer files that actually meet the configured format/bitrate bar;
+    # only fall back to everything if nothing does (better than nothing).
+    qualifying = [r for r in results if _meets_quality_bar(r, settings)]
+    pool = qualifying or results
     rescored = sorted(
-        results,
+        pool,
         key=lambda r: (
             _peer_priority(r),
             score_result(r, settings.preferred_format_list, settings.min_bitrate_kbps),
@@ -124,22 +145,35 @@ def best_album_folder(
     results: list[SearchFile], settings: Settings, min_tracks: int = 2
 ) -> list[SearchFile] | None:
     """Picks the (username, folder) that looks most like a complete album
-    share rather than a single stray file: most tracks first (a complete
-    album beats a partial one regardless of who's faster), then — among
-    folders tied on track count — the peer least likely to leave the
-    download stuck (free slot, short queue, fast upload), then best average
-    file-quality score as a final tiebreak. Returns None if nothing has at
-    least min_tracks files, so the caller can fall back to a single-file
-    best_match instead of forcing a "whole folder" result out of scraps."""
+    share in the preferred format/bitrate, rather than a single stray file
+    or a "good enough" folder in the wrong format.
+
+    Folders where every file meets the configured quality bar are
+    considered first and exclusively — a flac-only setting means an mp3
+    folder never gets picked over a flac one just for having a shorter
+    queue, even though nothing here is comparing them file-by-file. Only
+    if no folder clears the bar at all does the full candidate set get
+    considered, so a real album is still preferred over nothing.
+
+    Within whichever pool is used: most tracks first (a complete album
+    beats a partial one), then — among folders tied on track count — the
+    peer least likely to leave the download stuck (free slot, short queue,
+    fast upload), then best average file-quality score as a final
+    tiebreak. Returns None if nothing has at least min_tracks files, so the
+    caller can fall back to a single-file best_match instead of forcing a
+    "whole folder" result out of scraps."""
     groups = group_by_folder(results)
-    candidates = [files for files in groups.values() if len(files) >= min_tracks]
-    if not candidates:
+    all_candidates = [files for files in groups.values() if len(files) >= min_tracks]
+    if not all_candidates:
         return None
+
+    qualifying = [files for files in all_candidates if all(_meets_quality_bar(f, settings) for f in files)]
+    pool = qualifying or all_candidates
 
     def group_key(files: list[SearchFile]) -> tuple:
         scores = [score_result(f, settings.preferred_format_list, settings.min_bitrate_kbps) for f in files]
         avg_quality = sum(scores) / len(scores)
         return (len(files), *_peer_priority(files[0]), avg_quality)
 
-    candidates.sort(key=group_key, reverse=True)
-    return candidates[0]
+    pool.sort(key=group_key, reverse=True)
+    return pool[0]

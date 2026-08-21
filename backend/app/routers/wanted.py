@@ -10,7 +10,7 @@ from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient
 from ..config import get_settings
 from ..database import get_session
-from ..models import WantedItem
+from ..models import DownloadRecord, WantedItem
 from ..schemas import MissingAlbumOut, WantedCreate, WantedOut
 from ..services.plex_gaps import get_artist_discography, get_owned_album_titles_from_snapshot
 from ..services.wanted import process_all_wanted, process_wanted_item
@@ -105,6 +105,20 @@ def delete_wanted(wanted_id: int, session: Session = Depends(get_session)):
     item = session.get(WantedItem, wanted_id)
     if not item:
         raise HTTPException(status_code=404, detail="wanted item not found")
+
+    # Otherwise these become orphaned but still-retryable rows once the
+    # wanted item is gone. If the same artist/album is re-added and
+    # re-scanned later, clicking Retry on one of these stale leftovers —
+    # if its file is still sitting in the download dir from the earlier
+    # attempt — tags and organizes it now, landing on the exact same
+    # destination path a newer, independent download already organized,
+    # producing a silent duplicate on disk.
+    records = session.exec(
+        select(DownloadRecord).where(DownloadRecord.wanted_item_id == wanted_id)
+    ).all()
+    for record in records:
+        session.delete(record)
+
     session.delete(item)
     session.commit()
 

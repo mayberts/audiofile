@@ -25,6 +25,36 @@ def _extract_track_number(filename: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# Matches a leading "01 - ", "01. ", "01_", "01 " track-number marker — the
+# near-universal prefix on a Soulseek folder-rip filename once the artist
+# and album are already established by the folder itself.
+_LEADING_TRACK_NUMBER_RE = re.compile(r"^\s*\d{1,2}[\s._-]+")
+
+
+def _extract_track_title(filename: str, artist: str) -> str | None:
+    """Best-effort track title guessed from the filename, used to match
+    against MusicBrainz's tracklist by title instead of by position.
+
+    Position-only matching ties tagging to whichever specific release
+    edition happened to come back from the MusicBrainz search — for an
+    album with many regional/bonus-track pressings (a common case), that
+    edition's track count and order won't necessarily line up with what
+    a given Soulseek peer actually has, silently mislabeling tracks.
+    Matching by title instead works regardless of which edition's
+    tracklist we're comparing against, since a bonus-track edition adds
+    tracks rather than renaming the ones a plainer rip already has."""
+    stem = PureWindowsPath(filename).stem
+    # Some rips repeat the artist name in every filename ("NSYNC - 05 -
+    # Pop") — strip that first so the track-number strip below still finds
+    # its leading position.
+    if artist:
+        prefix = re.match(rf"^\s*{re.escape(artist)}\s*[-_]\s*", stem, re.IGNORECASE)
+        if prefix:
+            stem = stem[prefix.end():]
+    title = _LEADING_TRACK_NUMBER_RE.sub("", stem, count=1).strip()
+    return title or None
+
+
 # Soulseek uploads come almost exclusively from Windows clients, so a
 # folder/file name can never literally contain a character Windows forbids
 # in paths — an official title that does (MusicBrainz lists NSYNC's debut
@@ -132,10 +162,11 @@ def process_wanted_item(
             size_bytes=m.size,
             hint_artist=item.artist,
             hint_album=item.album,
-            # A whole-folder grab has no single track title to hint with —
-            # tagging instead matches each file's parsed track number
-            # against the release's actual tracklist.
-            hint_track=item.track if not is_batch else None,
+            # A whole-folder grab has no single track name from the wanted
+            # item itself — hint_track is instead a best-effort title
+            # guessed from the filename, with hint_track_number as a
+            # fallback for when that guess doesn't match anything.
+            hint_track=item.track if not is_batch else _extract_track_title(m.filename, item.artist),
             hint_track_number=_extract_track_number(m.filename) if is_batch else None,
             status=DownloadStatus.QUEUED,
         )

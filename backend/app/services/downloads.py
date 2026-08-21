@@ -108,17 +108,23 @@ def resolve_track_metadata(
 
         if release:
             matching_track = None
-            if record.hint_track_number is not None:
-                # Album-batch downloads have no single track title to hint
-                # with, only a track number parsed from the remote filename —
-                # match on position instead.
-                matching_track = next(
-                    (t for t in release.tracks if t.get("position") == record.hint_track_number),
-                    None,
-                )
-            elif record.hint_track:
+            if record.hint_track:
+                # Title match first: it's robust to which specific release
+                # edition search_release happened to return, since an
+                # album with many regional/bonus-track pressings (varying
+                # track counts and ordering) still has this track under
+                # the same title regardless of which pressing's tracklist
+                # we're comparing against. Position doesn't have that
+                # property — it silently mismatches whenever the matched
+                # release's tracklist doesn't line up with what this peer
+                # actually has.
                 matching_track = next(
                     (t for t in release.tracks if t.get("title", "").lower() == record.hint_track.lower()),
+                    None,
+                )
+            if matching_track is None and record.hint_track_number is not None:
+                matching_track = next(
+                    (t for t in release.tracks if t.get("position") == record.hint_track_number),
                     None,
                 )
 

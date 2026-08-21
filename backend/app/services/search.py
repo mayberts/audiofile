@@ -82,6 +82,15 @@ def score_result(
     return round(score, 2)
 
 
+def _peer_priority(sample: SearchFile) -> tuple[bool, int, int]:
+    """Tiebreak ahead of file-quality score: a peer with no free upload
+    slot won't even start the transfer, and a long queue or slow upload
+    speed can leave a download sitting for ages regardless of how good the
+    file itself looks. Sorted descending, so higher is better throughout —
+    queue length is negated so a shorter queue sorts first."""
+    return (sample.slots_free, -(sample.queue_length or 0), sample.upload_speed or 0)
+
+
 def best_match(
     results: list[SearchFile], settings: Settings
 ) -> SearchFile | None:
@@ -89,7 +98,10 @@ def best_match(
         return None
     rescored = sorted(
         results,
-        key=lambda r: score_result(r, settings.preferred_format_list, settings.min_bitrate_kbps),
+        key=lambda r: (
+            _peer_priority(r),
+            score_result(r, settings.preferred_format_list, settings.min_bitrate_kbps),
+        ),
         reverse=True,
     )
     return rescored[0]
@@ -112,18 +124,22 @@ def best_album_folder(
     results: list[SearchFile], settings: Settings, min_tracks: int = 2
 ) -> list[SearchFile] | None:
     """Picks the (username, folder) that looks most like a complete album
-    share rather than a single stray file: most tracks first, then best
-    average quality score. Returns None if nothing has at least min_tracks
-    files, so the caller can fall back to a single-file best_match instead
-    of forcing a "whole folder" result out of scraps."""
+    share rather than a single stray file: most tracks first (a complete
+    album beats a partial one regardless of who's faster), then — among
+    folders tied on track count — the peer least likely to leave the
+    download stuck (free slot, short queue, fast upload), then best average
+    file-quality score as a final tiebreak. Returns None if nothing has at
+    least min_tracks files, so the caller can fall back to a single-file
+    best_match instead of forcing a "whole folder" result out of scraps."""
     groups = group_by_folder(results)
     candidates = [files for files in groups.values() if len(files) >= min_tracks]
     if not candidates:
         return None
 
-    def group_key(files: list[SearchFile]) -> tuple[int, float]:
+    def group_key(files: list[SearchFile]) -> tuple:
         scores = [score_result(f, settings.preferred_format_list, settings.min_bitrate_kbps) for f in files]
-        return (len(files), sum(scores) / len(scores))
+        avg_quality = sum(scores) / len(scores)
+        return (len(files), *_peer_priority(files[0]), avg_quality)
 
     candidates.sort(key=group_key, reverse=True)
     return candidates[0]

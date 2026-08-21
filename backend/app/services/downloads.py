@@ -46,6 +46,7 @@ def sync_transfer_status(session: Session, slskd: SlskdClient) -> None:
         logger.warning("could not fetch slskd transfer list: %s", exc)
         return
 
+    newly_failed: list[DownloadRecord] = []
     for record in pending:
         transfer = find_transfer(all_downloads, record.slskd_username, record.slskd_filename)
         if transfer is None:
@@ -60,11 +61,21 @@ def sync_transfer_status(session: Session, slskd: SlskdClient) -> None:
         elif "completed" in state and "succeeded" not in state:
             record.status = DownloadStatus.FAILED
             record.error = transfer.get("state")
+            newly_failed.append(record)
         elif "inprogress" in state or "queued" in state:
             record.status = DownloadStatus.IN_PROGRESS
 
         session.add(record)
     session.commit()
+
+    # A transfer that fails here (peer went offline, errored out, timed
+    # out — anything slskd itself gives up on) never reaches COMPLETED, so
+    # it never goes through process_completed_download — the only other
+    # place that reflects a finished record back onto its wanted item.
+    # Without this, the wanted item sits in DOWNLOADING forever even
+    # though slskd already gave up on the transfer.
+    for record in newly_failed:
+        _sync_wanted_item(session, record)
 
 
 def resolve_track_metadata(
@@ -184,6 +195,23 @@ def process_completed_download(
     session.add(record)
     session.commit()
     _sync_wanted_item(session, record)
+
+
+def reconcile_stuck_wanted_items(session: Session) -> None:
+    """Catches a wanted item left stuck in SEARCHING/DOWNLOADING because one
+    of its download records already reached a terminal state without ever
+    triggering _sync_wanted_item for it — e.g. records that failed before
+    sync_transfer_status started calling it, or any other path that missed
+    the sync. Runs every poll tick; a no-op once nothing's actually stuck."""
+    stuck = session.exec(
+        select(WantedItem).where(WantedItem.status.in_([WantedStatus.SEARCHING, WantedStatus.DOWNLOADING]))
+    ).all()
+    for wanted in stuck:
+        record = session.exec(
+            select(DownloadRecord).where(DownloadRecord.wanted_item_id == wanted.id)
+        ).first()
+        if record is not None:
+            _sync_wanted_item(session, record)
 
 
 def _sync_wanted_item(session: Session, record: DownloadRecord) -> None:

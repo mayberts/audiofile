@@ -34,6 +34,8 @@ def poll_downloads_job() -> None:
             ).all()
             for record in completed:
                 downloads_service.process_completed_download(session, record, settings, mb, release_cache)
+
+            downloads_service.reconcile_stuck_wanted_items(session)
     except Exception:  # noqa: BLE001
         logger.exception("poll_downloads_job failed")
     finally:

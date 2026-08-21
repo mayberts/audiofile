@@ -29,9 +29,53 @@ _LEADING_TRACK_MARKER_RE = re.compile(r"^\s*(?:\d{1,2}[-.])?(\d{1,2})[\s._-]+")
 # digit token anywhere in the name (e.g. "Artist_Album_05_Title").
 _EMBEDDED_TRACK_NUMBER_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
 
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
-def _extract_track_number(filename: str) -> int | None:
+
+def _strip_known_prefix(stem: str, value: str | None) -> str:
+    """Strips `value` (the wanted item's artist or album) off the front of
+    `stem` if it's there, comparing letters/digits only, case-insensitive
+    — a filename can't literally contain whatever MusicBrainz calls
+    something if that includes a character Windows forbids in a path
+    ("*NSYNC" shows up on disk as "-NSYNC", "NSYNC", etc.), so comparing
+    the literal strings would silently fail to recognize the very prefix
+    it's meant to strip. A no-op (returns stem unchanged) if `value`
+    isn't actually a prefix of stem."""
+    if not value:
+        return stem
+    target = _NON_ALNUM_RE.sub("", value.lower())
+    if not target:
+        return stem
+    normalized = ""
+    cut = 0
+    for i, ch in enumerate(stem):
+        if ch.isalnum():
+            normalized += ch.lower()
+        cut = i + 1
+        if normalized == target:
+            break
+    else:
+        return stem
+    if normalized != target:
+        return stem
+    remainder = stem[cut:]
+    sep = re.match(r"[\s._-]+", remainder)
+    return remainder[sep.end():] if sep else remainder
+
+
+def _strip_repeated_prefix(filename: str, artist: str, album: str | None) -> str:
+    """Some rips repeat "Artist - Album - " (or just "Artist - ") on every
+    filename in the batch, ahead of the actual track marker — strip that
+    off first so the marker-parsing below still finds it leading. A no-op
+    when the filename doesn't actually have that prefix."""
     stem = PureWindowsPath(filename).stem
+    stem = _strip_known_prefix(stem, artist)
+    stem = _strip_known_prefix(stem, album)
+    return stem
+
+
+def _extract_track_number(filename: str, artist: str = "", album: str | None = None) -> int | None:
+    stem = _strip_repeated_prefix(filename, artist, album)
     match = _LEADING_TRACK_MARKER_RE.match(stem)
     if match:
         return int(match.group(1))
@@ -39,7 +83,7 @@ def _extract_track_number(filename: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _extract_track_title(filename: str, artist: str) -> str | None:
+def _extract_track_title(filename: str, artist: str, album: str | None = None) -> str | None:
     """Best-effort track title guessed from the filename, used to match
     against MusicBrainz's tracklist by title instead of by position.
 
@@ -51,14 +95,7 @@ def _extract_track_title(filename: str, artist: str) -> str | None:
     Matching by title instead works regardless of which edition's
     tracklist we're comparing against, since a bonus-track edition adds
     tracks rather than renaming the ones a plainer rip already has."""
-    stem = PureWindowsPath(filename).stem
-    # Some rips repeat the artist name in every filename ("NSYNC - 05 -
-    # Pop") — strip that first so the track-marker strip below still finds
-    # its leading position.
-    if artist:
-        prefix = re.match(rf"^\s*{re.escape(artist)}\s*[-_]\s*", stem, re.IGNORECASE)
-        if prefix:
-            stem = stem[prefix.end():]
+    stem = _strip_repeated_prefix(filename, artist, album)
     match = _LEADING_TRACK_MARKER_RE.match(stem)
     title = stem[match.end():] if match else stem
     return title.strip() or None
@@ -184,8 +221,8 @@ def process_wanted_item(
             # item itself — hint_track is instead a best-effort title
             # guessed from the filename, with hint_track_number as a
             # fallback for when that guess doesn't match anything.
-            hint_track=item.track if not is_batch else _extract_track_title(m.filename, item.artist),
-            hint_track_number=_extract_track_number(m.filename) if is_batch else None,
+            hint_track=item.track if not is_batch else _extract_track_title(m.filename, item.artist, item.album),
+            hint_track_number=_extract_track_number(m.filename, item.artist, item.album) if is_batch else None,
             status=DownloadStatus.QUEUED,
         )
         session.add(record)

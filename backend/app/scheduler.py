@@ -17,14 +17,20 @@ logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
 
+# Persists for the life of the process, not just one poll tick — a batch
+# download large enough to span multiple ticks (e.g. a 22-track 2xCD)
+# needs every track resolved against the same MusicBrainz release
+# regardless of which tick processes it, or tracks that complete on
+# different ticks can land on different editions (different dates) and
+# split one album across two differently-named library folders. See the
+# comment on resolve_track_metadata for why only successes get cached.
+_release_cache: dict = {}
+
 
 def poll_downloads_job() -> None:
     settings = get_settings()
     slskd = SlskdClient.from_settings(settings)
     mb = MusicBrainzClient(settings)
-    # Shared across every record processed this tick so an album batch's
-    # tracks reuse one MusicBrainz release lookup instead of one each.
-    release_cache: dict = {}
     try:
         with Session(engine) as session:
             downloads_service.sync_transfer_status(session, slskd)
@@ -33,7 +39,7 @@ def poll_downloads_job() -> None:
                 select(DownloadRecord).where(DownloadRecord.status == DownloadStatus.COMPLETED)
             ).all()
             for record in completed:
-                downloads_service.process_completed_download(session, record, settings, mb, release_cache)
+                downloads_service.process_completed_download(session, record, settings, mb, _release_cache)
 
             downloads_service.reconcile_stuck_wanted_items(session)
     except Exception:  # noqa: BLE001

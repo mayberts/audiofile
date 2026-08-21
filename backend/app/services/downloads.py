@@ -81,16 +81,23 @@ def sync_transfer_status(session: Session, slskd: SlskdClient) -> None:
 def resolve_track_metadata(
     record: DownloadRecord,
     mb: MusicBrainzClient,
-    release_cache: dict[tuple[str, str], ReleaseMatch | None] | None = None,
+    release_cache: dict[tuple[str, str], ReleaseMatch] | None = None,
 ) -> TrackMetadata:
     if record.hint_album and record.hint_artist:
         # An album-batch download produces one DownloadRecord per track, all
-        # sharing the same artist+album — without this cache, tagging a
+        # sharing the same artist+album. Without this cache, tagging a
         # 13-track album meant 26 serialized MusicBrainz round-trips (two
         # per track, throttled to ~1/sec) for what's really one release
-        # lookup, which both took ages and made catching a MusicBrainz 503
-        # partway through the batch (failing only some of the tracks) far
-        # more likely than it needs to be.
+        # lookup — and every one of those lookups is also a fresh roll of
+        # MusicBrainz's search ranking, which isn't guaranteed stable for
+        # an album with many regional/bonus-track pressings. A caller that
+        # shares one cache across every tick of a multi-tick batch (see
+        # poll_downloads_job) guarantees every track resolves against the
+        # exact same release, whichever one search_release() happened to
+        # return the first time — otherwise a slow batch that spans more
+        # than one poll tick can resolve different tracks against
+        # different editions (different dates), splitting one album
+        # across two differently-named library folders.
         cache_key = (record.hint_artist, record.hint_album)
         if release_cache is not None and cache_key in release_cache:
             release = release_cache[cache_key]
@@ -103,7 +110,13 @@ def resolve_track_metadata(
                 full_release = mb.get_release(release.release_mbid)
                 if full_release:
                     release = full_release
-            if release_cache is not None:
+            if release_cache is not None and release is not None:
+                # Only successful resolutions are cached — a failed/None
+                # lookup (e.g. a transient MusicBrainz 503) is never
+                # remembered, so it gets retried rather than permanently
+                # poisoning every later track of this album for as long as
+                # the cache lives (this cache is now shared across poll
+                # ticks, not just within one — see poll_downloads_job).
                 release_cache[cache_key] = release
 
         if release:

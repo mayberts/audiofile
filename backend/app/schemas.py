@@ -100,6 +100,7 @@ class MissingAlbumOut(BaseModel):
     album: str
     release_group_mbid: Optional[str] = None
     first_release_date: Optional[str] = None
+    in_library: bool = False
 
 
 class AddMissingAlbumRequest(BaseModel):

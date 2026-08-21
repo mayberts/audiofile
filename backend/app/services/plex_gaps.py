@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 
 from plexapi.server import PlexServer
+from sqlmodel import Session, func, select
 
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.plex import get_artist_album_titles, get_artist_item
+from ..models import LibraryAlbum
 
 # Secondary/live/compilation-style release groups are rarely what someone
 # means by "albums I don't have", so keep the default check to primary
@@ -90,11 +92,30 @@ def get_missing_tracks_for_album(plex: PlexServer, mb: MusicBrainzClient, album_
     }
 
 
-def get_artist_discography(mb: MusicBrainzClient, artist_name: str) -> list[dict]:
+def get_owned_album_titles_from_snapshot(session: Session, artist_name: str) -> set[str]:
+    """Cross-references against the persisted Plex library snapshot (see
+    LibraryAlbum / /api/plex/library/scan) by artist name, not rating key —
+    used by the free-text-artist discography picker on the Wanted page,
+    which has no Plex rating key to look up (the artist name typed there
+    may not even match a known Plex item, or the library may never have
+    been scanned)."""
+    rows = session.exec(
+        select(LibraryAlbum).where(func.lower(LibraryAlbum.artist) == artist_name.strip().lower())
+    ).all()
+    return {_normalize_title(row.album) for row in rows}
+
+
+def get_artist_discography(
+    mb: MusicBrainzClient, artist_name: str, owned_normalized: set[str] | None = None
+) -> list[dict]:
     """Every studio album MusicBrainz lists for this artist name, most
     recent first. Doesn't touch Plex at all, so it works for an artist you
     don't own anything by yet — used to let someone pick specific albums to
-    want instead of adding one ambiguous "whole discography" entry."""
+    want instead of adding one ambiguous "whole discography" entry.
+
+    If owned_normalized is given, each album is tagged with whether it
+    matches something already owned, rather than being filtered out —
+    the caller decides whether "already have it" means hide or just flag."""
     mb_artist = mb.search_artist(artist_name)
     if not mb_artist:
         return []
@@ -110,6 +131,8 @@ def get_artist_discography(mb: MusicBrainzClient, artist_name: str) -> list[dict
         if _is_studio_album(rg)
     ]
     albums.sort(key=lambda a: a["first_release_date"] or "", reverse=True)
+    for album in albums:
+        album["in_library"] = bool(owned_normalized and (_title_variants(album["album"]) & owned_normalized))
     return albums
 
 
@@ -119,5 +142,5 @@ def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artis
     MusicBrainz requests), not a whole-library background scan."""
     artist = get_artist_item(plex, artist_rating_key)
     owned_normalized = {_normalize_title(t) for t in get_artist_album_titles(artist)}
-    discography = get_artist_discography(mb, artist.title)
-    return [a for a in discography if not (_title_variants(a["album"]) & owned_normalized)]
+    discography = get_artist_discography(mb, artist.title, owned_normalized)
+    return [a for a in discography if not a["in_library"]]

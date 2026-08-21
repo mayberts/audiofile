@@ -212,6 +212,12 @@ tr:hover td {
   color: var(--danger);
 }
 
+.badge.in-library {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -391,6 +397,11 @@ form.inline {
   flex-direction: column;
   gap: 0.15rem;
   font-size: 0.88rem;
+  flex: 1;
+}
+
+.discography-row-owned {
+  opacity: 0.55;
 }
 
 .poster-grid {

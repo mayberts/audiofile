@@ -24,9 +24,11 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
       .finally(() => setLoading(false));
   }, [artist]);
 
+  const missingAlbums = useMemo(() => (albums || []).filter((a) => !a.in_library), [albums]);
+
   const allSelected = useMemo(
-    () => !!albums && albums.length > 0 && selected.size === albums.length,
-    [albums, selected],
+    () => missingAlbums.length > 0 && selected.size === missingAlbums.length,
+    [missingAlbums, selected],
   );
 
   function toggle(album: string) {
@@ -39,8 +41,9 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
   }
 
   function toggleAll() {
-    if (!albums) return;
-    setSelected(allSelected ? new Set() : new Set(albums.map((a) => a.album)));
+    // Already-owned albums are excluded from "select all" — someone who
+    // wants to re-grab one anyway can still tick it by hand.
+    setSelected(allSelected ? new Set() : new Set(missingAlbums.map((a) => a.album)));
   }
 
   async function onAddSelected() {
@@ -100,19 +103,20 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
 
         {!loading && albums && albums.length > 0 && (
           <>
-            <label className="row" style={{ marginBottom: "0.5rem", cursor: "pointer" }}>
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-              Select all ({albums.length})
+            <label className="row" style={{ marginBottom: "0.5rem", cursor: missingAlbums.length ? "pointer" : "default" }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={missingAlbums.length === 0} />
+              Select all missing ({missingAlbums.length})
             </label>
             <div className="panel" style={{ maxHeight: "60vh", overflowY: "auto", padding: "0.4rem" }}>
               {albums.map((a) => (
-                <label key={a.album} className="discography-row">
+                <label key={a.album} className={`discography-row${a.in_library ? " discography-row-owned" : ""}`}>
                   <input type="checkbox" checked={selected.has(a.album)} onChange={() => toggle(a.album)} />
                   <AlbumCover releaseGroupMbid={a.release_group_mbid} />
                   <div className="discography-row-info">
                     <div>{a.album}</div>
                     <div className="muted">{(a.first_release_date || "").slice(0, 4) || "—"}</div>
                   </div>
+                  {a.in_library && <span className="badge in-library">In Library</span>}
                 </label>
               ))}
             </div>

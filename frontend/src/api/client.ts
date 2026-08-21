@@ -77,6 +77,7 @@ export interface MissingAlbumOut {
   album: string;
   release_group_mbid: string | null;
   first_release_date: string | null;
+  in_library: boolean;
 }
 
 export interface MissingTrackOut {

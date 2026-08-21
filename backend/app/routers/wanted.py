@@ -12,7 +12,7 @@ from ..config import get_settings
 from ..database import get_session
 from ..models import WantedItem
 from ..schemas import MissingAlbumOut, WantedCreate, WantedOut
-from ..services.plex_gaps import get_artist_discography
+from ..services.plex_gaps import get_artist_discography, get_owned_album_titles_from_snapshot
 from ..services.wanted import process_all_wanted, process_wanted_item
 
 logger = logging.getLogger(__name__)
@@ -26,14 +26,18 @@ def list_wanted(session: Session = Depends(get_session)):
 
 
 @router.get("/discography", response_model=list[MissingAlbumOut])
-def get_discography(artist: str):
+def get_discography(artist: str, session: Session = Depends(get_session)):
     """Backs the album picker shown when adding just an artist name (no
     album/track) — lets someone choose specific albums instead of one
-    ambiguous "whole discography" wanted item. Doesn't need Plex at all."""
+    ambiguous "whole discography" wanted item. Flags albums already in the
+    Plex library (from the last library scan) so the picker can show what's
+    already owned instead of presenting the full discography as if none of
+    it were."""
     settings = get_settings()
     mb = MusicBrainzClient(settings)
     try:
-        return get_artist_discography(mb, artist)
+        owned = get_owned_album_titles_from_snapshot(session, artist)
+        return get_artist_discography(mb, artist, owned)
     except httpx.HTTPStatusError as exc:
         logger.warning("Discography lookup failed for %r: %s", artist, exc)
         if exc.response.status_code == 503:

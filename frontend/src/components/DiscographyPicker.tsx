@@ -14,7 +14,7 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
+  function loadDiscography() {
     setLoading(true);
     setError(null);
     api
@@ -22,7 +22,9 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
       .then(setAlbums)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
-  }, [artist]);
+  }
+
+  useEffect(loadDiscography, [artist]);
 
   const missingAlbums = useMemo(() => (albums || []).filter((a) => !a.in_library), [albums]);
 
@@ -91,7 +93,16 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
         </div>
         <p className="muted" style={{ marginTop: 0 }}>Pick which albums to add to the wanted list.</p>
 
-        {error && <div className="error-text" style={{ marginBottom: "0.8rem" }}>{error}</div>}
+        {error && (
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: "0.8rem" }}>
+            <div className="error-text">{error}</div>
+            {albums === null && (
+              <button className="secondary" onClick={loadDiscography} disabled={loading}>
+                {loading ? "Retrying..." : "Retry"}
+              </button>
+            )}
+          </div>
+        )}
 
         {loading && <div className="muted">Checking MusicBrainz...</div>}
 

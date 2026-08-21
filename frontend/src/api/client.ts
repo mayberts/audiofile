@@ -175,6 +175,7 @@ export const api = {
   listWanted: () => request<WantedOut[]>("/api/wanted"),
   getArtistDiscography: (artist: string) =>
     request<MissingAlbumOut[]>(`/api/wanted/discography?artist=${encodeURIComponent(artist)}`),
+  coverArtUrl: (releaseGroupMbid: string) => `/api/wanted/cover-art/${encodeURIComponent(releaseGroupMbid)}`,
   createWanted: (params: { artist: string; album?: string; track?: string }) =>
     request<WantedOut>("/api/wanted", { method: "POST", body: JSON.stringify(params) }),
   deleteWanted: (id: number) => request<void>(`/api/wanted/${id}`, { method: "DELETE" }),

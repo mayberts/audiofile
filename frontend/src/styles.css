@@ -348,6 +348,51 @@ form.inline {
   overflow-y: auto;
 }
 
+.modal-panel-wide {
+  max-width: 760px;
+}
+
+.discography-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.discography-row:last-child {
+  border-bottom: none;
+}
+
+.discography-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.discography-row-cover,
+.discography-row-cover-fallback {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.discography-row-cover {
+  object-fit: cover;
+  display: block;
+}
+
+.discography-row-cover-fallback {
+  background: linear-gradient(160deg, var(--panel-2), var(--bg));
+}
+
+.discography-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.88rem;
+}
+
 .poster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));

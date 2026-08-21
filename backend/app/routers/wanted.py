@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
@@ -48,6 +48,26 @@ def get_discography(artist: str):
         raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc
     finally:
         mb.close()
+
+
+@router.get("/cover-art/{release_group_mbid}")
+def get_cover_art(release_group_mbid: str):
+    """Proxies Cover Art Archive art for the discography picker — same
+    "server fetches, browser only sees our URL" pattern as the Plex image
+    proxy, and lets the browser cache it by URL across renders."""
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        image_bytes = mb.get_release_group_cover_art(release_group_mbid)
+    finally:
+        mb.close()
+    if image_bytes is None:
+        raise HTTPException(status_code=404, detail="no cover art found")
+    return Response(
+        content=image_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.post("", response_model=WantedOut)

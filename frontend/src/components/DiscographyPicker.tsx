@@ -79,7 +79,7 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel modal-panel-wide" onClick={(e) => e.stopPropagation()}>
         <div className="row" style={{ justifyContent: "space-between", marginBottom: "0.4rem" }}>
           <h2 style={{ margin: 0 }}>{artist}</h2>
           <button className="secondary" onClick={onClose}>
@@ -104,26 +104,17 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
               <input type="checkbox" checked={allSelected} onChange={toggleAll} />
               Select all ({albums.length})
             </label>
-            <div className="panel" style={{ maxHeight: "40vh", overflowY: "auto", padding: "0.4rem" }}>
-              <table>
-                <tbody>
-                  {albums.map((a) => (
-                    <tr key={a.album}>
-                      <td style={{ width: "1.6rem" }}>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(a.album)}
-                          onChange={() => toggle(a.album)}
-                        />
-                      </td>
-                      <td>{a.album}</td>
-                      <td className="muted" style={{ width: "5rem" }}>
-                        {(a.first_release_date || "").slice(0, 4) || "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="panel" style={{ maxHeight: "60vh", overflowY: "auto", padding: "0.4rem" }}>
+              {albums.map((a) => (
+                <label key={a.album} className="discography-row">
+                  <input type="checkbox" checked={selected.has(a.album)} onChange={() => toggle(a.album)} />
+                  <AlbumCover releaseGroupMbid={a.release_group_mbid} />
+                  <div className="discography-row-info">
+                    <div>{a.album}</div>
+                    <div className="muted">{(a.first_release_date || "").slice(0, 4) || "—"}</div>
+                  </div>
+                </label>
+              ))}
             </div>
           </>
         )}
@@ -142,5 +133,21 @@ export default function DiscographyPicker({ artist, onClose, onAdded }: Discogra
         </div>
       </div>
     </div>
+  );
+}
+
+function AlbumCover({ releaseGroupMbid }: { releaseGroupMbid: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (!releaseGroupMbid || failed) {
+    return <div className="discography-row-cover-fallback" />;
+  }
+  return (
+    <img
+      className="discography-row-cover"
+      src={api.coverArtUrl(releaseGroupMbid)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   );
 }

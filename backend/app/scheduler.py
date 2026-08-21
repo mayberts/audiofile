@@ -85,3 +85,13 @@ def stop_scheduler() -> None:
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+def reschedule_wanted_scan(minutes: int) -> None:
+    """The scheduler only reads Settings once, at startup, to build the
+    job's interval trigger — saving a new value via the Settings page
+    otherwise has no effect on the already-running job until the process
+    restarts. Called after a settings update that touches
+    wanted_scan_interval_minutes so it takes effect immediately."""
+    if _scheduler is not None:
+        _scheduler.reschedule_job("process_wanted", trigger="interval", minutes=minutes)

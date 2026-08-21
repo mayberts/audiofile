@@ -6,6 +6,7 @@ from ..clients.plex import PlexNotConfigured, connect_plex
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import get_settings, update_settings
 from ..schemas import ConnectionTestResult, SettingsUpdate, TestPlexRequest, TestSlskdRequest
+from ..scheduler import reschedule_wanted_scan
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -17,7 +18,10 @@ def read_settings():
 
 @router.put("")
 def write_settings(payload: SettingsUpdate):
-    settings = update_settings(payload.model_dump(exclude_unset=True))
+    patch = payload.model_dump(exclude_unset=True)
+    settings = update_settings(patch)
+    if "wanted_scan_interval_minutes" in patch:
+        reschedule_wanted_scan(settings.wanted_scan_interval_minutes)
     return settings.masked()
 
 

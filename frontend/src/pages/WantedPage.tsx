@@ -10,6 +10,7 @@ export default function WantedPage() {
   const [error, setError] = useState<string | null>(null);
   const [scanningAll, setScanningAll] = useState(false);
   const [pickingArtist, setPickingArtist] = useState<string | null>(null);
+  const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
 
   async function refresh() {
     try {
@@ -60,8 +61,17 @@ export default function WantedPage() {
   }
 
   async function onScanNow(id: number) {
-    await api.scanWantedNow(id);
-    refresh();
+    setScanningIds((prev) => new Set(prev).add(id));
+    try {
+      await api.scanWantedNow(id);
+      refresh();
+    } finally {
+      setScanningIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }
 
   async function onScanAll() {
@@ -128,8 +138,12 @@ export default function WantedPage() {
                     <span className={`badge ${w.status}`}>{w.status.replace("_", " ")}</span>
                   </td>
                   <td className="row">
-                    <button className="secondary" onClick={() => onScanNow(w.id)}>
-                      Scan
+                    <button
+                      className="secondary"
+                      onClick={() => onScanNow(w.id)}
+                      disabled={scanningIds.has(w.id) || w.status === "searching" || w.status === "downloading"}
+                    >
+                      {scanningIds.has(w.id) ? "Scanning..." : "Scan"}
                     </button>
                     <button className="danger" onClick={() => onDelete(w.id)}>
                       Remove

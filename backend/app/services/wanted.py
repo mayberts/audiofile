@@ -36,6 +36,17 @@ def _build_query(item: WantedItem) -> str:
 def process_wanted_item(
     session: Session, item: WantedItem, slskd: SlskdClient, settings: Settings
 ) -> None:
+    if item.status in (WantedStatus.SEARCHING, WantedStatus.DOWNLOADING):
+        # Already in flight — the background scan (every
+        # wanted_scan_interval_minutes) and the manual "Scan" button both
+        # funnel through here with no locking between them, so without this
+        # a double-click, or a manual scan landing right as the scheduled
+        # tick picks up the same item, searches and enqueues the same files
+        # twice. slskd doesn't dedupe that itself — it just saves the second
+        # copy with a "_dup" suffix.
+        logger.info("wanted item %s already %s, skipping duplicate scan", item.id, item.status)
+        return
+
     item.status = WantedStatus.SEARCHING
     session.add(item)
     session.commit()

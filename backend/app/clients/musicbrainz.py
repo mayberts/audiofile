@@ -75,6 +75,12 @@ class MusicBrainzClient:
             base_url=COVER_ART_BASE,
             headers={"User-Agent": user_agent},
             timeout=15.0,
+            # Cover Art Archive's /front convenience endpoints respond with a
+            # redirect to the actual image (hosted on archive.org), not the
+            # image bytes at that URL directly — httpx doesn't follow
+            # redirects by default, so without this every cover-art fetch
+            # silently got a 3xx back and returned None.
+            follow_redirects=True,
         )
 
     def close(self) -> None:

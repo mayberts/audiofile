@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import PureWindowsPath
 
 from sqlmodel import Session, select
 
@@ -10,6 +12,17 @@ from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedStatus
 from . import search as search_service
 
 logger = logging.getLogger(__name__)
+
+# Standalone 1-2 digit token, not part of a longer number — matches the
+# track-position segment in the near-universal Soulseek folder-rip naming
+# conventions ("01 - Title.flac", "01_Title.flac", "Artist_Album_01_Title.flac").
+_TRACK_NUMBER_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
+
+
+def _extract_track_number(filename: str) -> int | None:
+    stem = PureWindowsPath(filename).stem
+    match = _TRACK_NUMBER_RE.search(stem)
+    return int(match.group(1)) if match else None
 
 
 def _build_query(item: WantedItem) -> str:
@@ -41,7 +54,6 @@ def process_wanted_item(
         return
 
     results = search_service.parse_search_responses(raw)
-    match = search_service.best_match(results, settings)
     logger.info(
         "wanted item %s: %d raw peer responses, %d audio-file results after parsing",
         item.id,
@@ -49,15 +61,33 @@ def process_wanted_item(
         len(results),
     )
 
-    if match is None:
+    # An album want should grab everything one peer has in one folder, not
+    # just the single highest-scored file across everyone — that's what was
+    # producing one random track instead of the whole album. Only applies
+    # when there's no specific track (a genuine single-track want still
+    # wants exactly one file), and falls back to the old single-file match
+    # if nobody has at least 2 tracks of it in one folder.
+    is_album_want = bool(item.album) and not item.track
+    matches: list[search_service.SearchFile] = []
+    if is_album_want:
+        folder = search_service.best_album_folder(results, settings)
+        if folder:
+            matches = folder
+    if not matches:
+        single = search_service.best_match(results, settings)
+        if single:
+            matches = [single]
+
+    if not matches:
         item.status = WantedStatus.NOT_FOUND
         item.last_error = "no matching files found on Soulseek"
         session.add(item)
         session.commit()
         return
 
+    username = matches[0].username
     try:
-        slskd.enqueue_download(match.username, [{"filename": match.filename, "size": match.size}])
+        slskd.enqueue_download(username, [{"filename": m.filename, "size": m.size} for m in matches])
     except SlskdError as exc:
         item.status = WantedStatus.FAILED
         item.last_error = str(exc)
@@ -65,17 +95,23 @@ def process_wanted_item(
         session.commit()
         return
 
-    record = DownloadRecord(
-        wanted_item_id=item.id,
-        slskd_username=match.username,
-        slskd_filename=match.filename,
-        size_bytes=match.size,
-        hint_artist=item.artist,
-        hint_album=item.album,
-        hint_track=item.track,
-        status=DownloadStatus.QUEUED,
-    )
-    session.add(record)
+    is_batch = len(matches) > 1
+    for m in matches:
+        record = DownloadRecord(
+            wanted_item_id=item.id,
+            slskd_username=username,
+            slskd_filename=m.filename,
+            size_bytes=m.size,
+            hint_artist=item.artist,
+            hint_album=item.album,
+            # A whole-folder grab has no single track title to hint with —
+            # tagging instead matches each file's parsed track number
+            # against the release's actual tracklist.
+            hint_track=item.track if not is_batch else None,
+            hint_track_number=_extract_track_number(m.filename) if is_batch else None,
+            status=DownloadStatus.QUEUED,
+        )
+        session.add(record)
 
     item.status = WantedStatus.DOWNLOADING
     item.last_error = None

@@ -69,7 +69,11 @@ export default function DownloadsPage() {
             <tbody>
               {downloads.map((d) => {
                 const name = d.slskd_filename.split(/[\\/]/).pop();
-                const label = [d.hint_artist, d.hint_track || d.hint_album].filter(Boolean).join(" — ") || name;
+                // An album-batch download has no single hint_track (every
+                // row in the batch would otherwise show the same
+                // "Artist — Album" label with no way to tell tracks apart),
+                // so fall back to the actual filename before the album name.
+                const label = [d.hint_artist, d.hint_track || name || d.hint_album].filter(Boolean).join(" — ");
                 const cancellable = d.status === "queued" || d.status === "in_progress";
                 return (
                   <tr key={d.id}>

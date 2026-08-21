@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path, PureWindowsPath
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient, TrackMetadata
 from ..clients.slskd import SlskdClient, find_transfer
@@ -73,20 +73,29 @@ def resolve_track_metadata(record: DownloadRecord, mb: MusicBrainzClient) -> Tra
         if release:
             # search_release only returns summary release info — no per-track
             # listing — so a second lookup is needed to actually get tracks
-            # to match hint_track against and to fill in track_number below.
+            # to match against and to fill in track_number below.
             full_release = mb.get_release(release.release_mbid)
             if full_release:
                 release = full_release
-            matching_track = next(
-                (
-                    t
-                    for t in release.tracks
-                    if record.hint_track and t.get("title", "").lower() == record.hint_track.lower()
-                ),
-                None,
-            )
-            title = matching_track["title"] if matching_track else (record.hint_track or release.title)
-            track_number = matching_track["position"] if matching_track else None
+
+            matching_track = None
+            if record.hint_track_number is not None:
+                # Album-batch downloads have no single track title to hint
+                # with, only a track number parsed from the remote filename —
+                # match on position instead.
+                matching_track = next(
+                    (t for t in release.tracks if t.get("position") == record.hint_track_number),
+                    None,
+                )
+            elif record.hint_track:
+                matching_track = next(
+                    (t for t in release.tracks if t.get("title", "").lower() == record.hint_track.lower()),
+                    None,
+                )
+
+            fallback_title = record.hint_track or Path(remote_basename(record.slskd_filename)).stem
+            title = matching_track["title"] if matching_track else fallback_title
+            track_number = matching_track["position"] if matching_track else record.hint_track_number
             return TrackMetadata(
                 artist=release.artist or record.hint_artist,
                 album=release.title or record.hint_album,
@@ -160,21 +169,37 @@ def process_completed_download(
 def _sync_wanted_item(session: Session, record: DownloadRecord) -> None:
     """Reflects a finished download back onto its wanted-list entry, which
     otherwise stays stuck on DOWNLOADING forever — nothing else transitions
-    it once the DownloadRecord itself reaches a terminal state."""
+    it once the DownloadRecord itself reaches a terminal state.
+
+    An album want can produce several DownloadRecords sharing one
+    wanted_item_id (one whole-folder batch), so this waits until every
+    sibling record has reached DONE or FAILED before touching the wanted
+    item — otherwise the first track to finish would prematurely remove it
+    while the rest of the album is still downloading."""
     if record.wanted_item_id is None:
         return
     wanted = session.get(WantedItem, record.wanted_item_id)
     if wanted is None:
         return
-    if record.status == DownloadStatus.DONE:
-        # Downloaded is a terminal, successful outcome for a wanted item —
-        # nothing left to search or retry for, so it comes off the list
-        # entirely rather than sitting there as a permanently-green row.
-        session.delete(wanted)
-        session.commit()
+
+    siblings = session.exec(
+        select(DownloadRecord).where(DownloadRecord.wanted_item_id == wanted.id)
+    ).all()
+    terminal = {DownloadStatus.DONE, DownloadStatus.FAILED}
+    if not all(s.status in terminal for s in siblings):
         return
-    elif record.status == DownloadStatus.FAILED:
+
+    succeeded = [s for s in siblings if s.status == DownloadStatus.DONE]
+    if succeeded:
+        # At least one real file landed — nothing left to search or retry
+        # for, so it comes off the list entirely rather than sitting there
+        # as a permanently-green row.
+        session.delete(wanted)
+    else:
         wanted.status = WantedStatus.FAILED
-        wanted.last_error = record.error
-    session.add(wanted)
+        failed = [s for s in siblings if s.status == DownloadStatus.FAILED]
+        wanted.last_error = (
+            failed[-1].error if len(failed) == 1 else f"all {len(failed)} tracks failed to download"
+        )
+        session.add(wanted)
     session.commit()

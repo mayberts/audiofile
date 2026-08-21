@@ -72,6 +72,11 @@ class DownloadRecord(SQLModel, table=True):
     hint_artist: Optional[str] = None
     hint_album: Optional[str] = None
     hint_track: Optional[str] = None
+    # Set only for album-batch downloads (one wanted item, many files from
+    # one folder): a best-effort track position parsed from the remote
+    # filename, used to match against the release's actual tracklist since
+    # there's no single hint_track title for a whole-folder grab.
+    hint_track_number: Optional[int] = None
     mbid: Optional[str] = None
 
     status: DownloadStatus = Field(default=DownloadStatus.QUEUED)

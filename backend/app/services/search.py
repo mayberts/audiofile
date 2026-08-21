@@ -93,3 +93,37 @@ def best_match(
         reverse=True,
     )
     return rescored[0]
+
+
+def group_by_folder(results: list[SearchFile]) -> dict[tuple[str, str], list[SearchFile]]:
+    """Soulseek search hits are individual files; the directory a user's
+    file lives in is the closest thing to "this is one album share" — group
+    on (username, directory) so an album want can grab everything one
+    person has in one folder instead of the single best-scored file
+    across everyone."""
+    groups: dict[tuple[str, str], list[SearchFile]] = {}
+    for r in results:
+        directory = str(PureWindowsPath(r.filename).parent)
+        groups.setdefault((r.username, directory), []).append(r)
+    return groups
+
+
+def best_album_folder(
+    results: list[SearchFile], settings: Settings, min_tracks: int = 2
+) -> list[SearchFile] | None:
+    """Picks the (username, folder) that looks most like a complete album
+    share rather than a single stray file: most tracks first, then best
+    average quality score. Returns None if nothing has at least min_tracks
+    files, so the caller can fall back to a single-file best_match instead
+    of forcing a "whole folder" result out of scraps."""
+    groups = group_by_folder(results)
+    candidates = [files for files in groups.values() if len(files) >= min_tracks]
+    if not candidates:
+        return None
+
+    def group_key(files: list[SearchFile]) -> tuple[int, float]:
+        scores = [score_result(f, settings.preferred_format_list, settings.min_bitrate_kbps) for f in files]
+        return (len(files), sum(scores) / len(scores))
+
+    candidates.sort(key=group_key, reverse=True)
+    return candidates[0]

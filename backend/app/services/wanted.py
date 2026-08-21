@@ -101,8 +101,13 @@ def process_wanted_item(
     try:
         # This runs in the background (scheduler tick or "Scan All Now"), not
         # blocking a page load, so it can afford to wait longer than the
-        # interactive search page for slower-to-respond Soulseek peers.
-        raw = slskd.search(_build_query(item), timeout_ms=45000)
+        # interactive search page for slower-to-respond Soulseek peers. 45s
+        # turned out not to be nearly enough for heavily-shared content —
+        # a popular album can still be picking up its first handful of the
+        # (eventual) hundred-plus responses well past that mark, so the scan
+        # gave up and reported "not found" even though the exact same query,
+        # given a couple more minutes, found plenty.
+        raw = slskd.search(_build_query(item), timeout_ms=120000)
     except SlskdError as exc:
         logger.warning("search failed for wanted item %s: %s", item.id, exc)
         item.status = WantedStatus.FAILED

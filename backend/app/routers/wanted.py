@@ -4,7 +4,7 @@ import logging
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient
@@ -74,8 +74,25 @@ def get_cover_art(release_group_mbid: str):
     )
 
 
+def _norm(value: str | None) -> str | None:
+    return value.strip().lower() if value else None
+
+
 @router.post("", response_model=WantedOut)
 def create_wanted(payload: WantedCreate, session: Session = Depends(get_session)):
+    # A successfully-downloaded want is deleted (see _sync_wanted_item), so
+    # anything still in the table represents an open or retryable want —
+    # matching one here means this exact artist/album/track is already
+    # tracked, so re-adding it (e.g. clicking "Add" twice, or picking the
+    # same album from two different flows) reuses that row instead of
+    # kicking off a second, independent search+download for the same thing.
+    candidates = session.exec(
+        select(WantedItem).where(func.lower(WantedItem.artist) == _norm(payload.artist))
+    ).all()
+    for existing in candidates:
+        if _norm(existing.album) == _norm(payload.album) and _norm(existing.track) == _norm(payload.track):
+            return existing
+
     item = WantedItem(artist=payload.artist, album=payload.album, track=payload.track)
     session.add(item)
     session.commit()

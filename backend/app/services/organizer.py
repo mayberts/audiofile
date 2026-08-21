@@ -29,6 +29,21 @@ def library_path_for(library_dir: str, meta: TrackMetadata, source_path: Path) -
 def move_into_library(source_path: Path, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
-        destination = destination.with_stem(destination.stem + "_dup")
+        # A single fixed "_dup" suffix can itself collide again — e.g. two
+        # unrelated tracks both mistagged onto the same computed path (see
+        # the disc-numbering bug this was written alongside). shutil.move
+        # doesn't refuse an existing destination, it silently overwrites
+        # it, so a third file landing on an already-"_dup"'d path would
+        # quietly destroy a previously-moved file with no error anywhere.
+        # Counting up instead guarantees every file gets its own distinct
+        # destination, so a real tagging bug shows up as a pile of
+        # oddly-suffixed files to investigate instead of silent data loss.
+        stem, suffix = destination.stem, destination.suffix
+        candidate = destination.with_name(f"{stem}_dup{suffix}")
+        n = 2
+        while candidate.exists():
+            candidate = destination.with_name(f"{stem}_dup{n}{suffix}")
+            n += 1
+        destination = candidate
     shutil.move(str(source_path), str(destination))
     return destination

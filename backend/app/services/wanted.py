@@ -13,22 +13,30 @@ from . import search as search_service
 
 logger = logging.getLogger(__name__)
 
-# Standalone 1-2 digit token, not part of a longer number — matches the
-# track-position segment in the near-universal Soulseek folder-rip naming
-# conventions ("01 - Title.flac", "01_Title.flac", "Artist_Album_01_Title.flac").
-_TRACK_NUMBER_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
+# Matches a leading "01 - ", "01. ", "01_", "1-01 - " track marker — the
+# near-universal prefix on a Soulseek folder-rip filename once the artist
+# and album are already established by the folder itself. The optional
+# leading group handles disc-qualified numbering ("1-01", "2-05"), common
+# on multi-disc "Special Edition" releases (a bonus remix disc, say) —
+# without it, a filename like "1-01 - Pop.flac" has its DISC digit
+# mistaken for the track number by a plain "first standalone 1-2 digit
+# token" search (it finds "1" before ever reaching "01"), so every track
+# on a disc ends up parsed as if it were track "1", "2", etc. — silently
+# collapsing an entire disc's worth of files onto one tagged track.
+_LEADING_TRACK_MARKER_RE = re.compile(r"^\s*(?:\d{1,2}[-.])?(\d{1,2})[\s._-]+")
+
+# Fallback for a filename with no clean leading marker — a standalone 1-2
+# digit token anywhere in the name (e.g. "Artist_Album_05_Title").
+_EMBEDDED_TRACK_NUMBER_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
 
 
 def _extract_track_number(filename: str) -> int | None:
     stem = PureWindowsPath(filename).stem
-    match = _TRACK_NUMBER_RE.search(stem)
+    match = _LEADING_TRACK_MARKER_RE.match(stem)
+    if match:
+        return int(match.group(1))
+    match = _EMBEDDED_TRACK_NUMBER_RE.search(stem)
     return int(match.group(1)) if match else None
-
-
-# Matches a leading "01 - ", "01. ", "01_", "01 " track-number marker — the
-# near-universal prefix on a Soulseek folder-rip filename once the artist
-# and album are already established by the folder itself.
-_LEADING_TRACK_NUMBER_RE = re.compile(r"^\s*\d{1,2}[\s._-]+")
 
 
 def _extract_track_title(filename: str, artist: str) -> str | None:
@@ -45,14 +53,15 @@ def _extract_track_title(filename: str, artist: str) -> str | None:
     tracks rather than renaming the ones a plainer rip already has."""
     stem = PureWindowsPath(filename).stem
     # Some rips repeat the artist name in every filename ("NSYNC - 05 -
-    # Pop") — strip that first so the track-number strip below still finds
+    # Pop") — strip that first so the track-marker strip below still finds
     # its leading position.
     if artist:
         prefix = re.match(rf"^\s*{re.escape(artist)}\s*[-_]\s*", stem, re.IGNORECASE)
         if prefix:
             stem = stem[prefix.end():]
-    title = _LEADING_TRACK_NUMBER_RE.sub("", stem, count=1).strip()
-    return title or None
+    match = _LEADING_TRACK_MARKER_RE.match(stem)
+    title = stem[match.end():] if match else stem
+    return title.strip() or None
 
 
 # Soulseek uploads come almost exclusively from Windows clients, so a

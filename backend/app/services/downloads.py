@@ -154,7 +154,18 @@ def resolve_track_metadata(
             track_number = matching_track["position"] if matching_track else record.hint_track_number
             return TrackMetadata(
                 artist=release.artist or record.hint_artist,
-                album=release.title or record.hint_album,
+                # The caller's own album hint wins over the resolved
+                # release's exact title -- release.tracks is only needed to
+                # find accurate track titles/numbers, not to name the
+                # album. Picking a different specific edition/pressing (a
+                # deluxe reissue, a bonus disc bought to top up an album
+                # already in the library) is meant to enrich that same
+                # library entry, not fork it into a second one under a
+                # slightly different name -- which is exactly what tagging
+                # with release.title did: topping up "Album" against a
+                # "Album: Side B" release it was pinned to left Plex with
+                # two separate albums instead of one merged one.
+                album=record.hint_album or release.title,
                 title=title,
                 track_number=track_number,
                 year=(release.date or "")[:4] or None,

@@ -239,8 +239,14 @@ function MissingTracksPanel({
           )}
           {result.missing_tracks.length > 0 && (
             <MissingTracksTable
+              // The owned album's own title, always -- not
+              // result.release_title. Topping up against a differently-
+              // titled comparison release (a deluxe reissue, a bonus disc
+              // like "Album: Side B") should enrich this same library
+              // entry, not fork a second Plex album under the compared
+              // release's name.
               artist={artist}
-              album={result.release_title || albumName}
+              album={albumName}
               releaseMbid={result.release_mbid}
               tracks={result.missing_tracks}
             />

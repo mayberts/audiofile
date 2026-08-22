@@ -137,12 +137,12 @@ def get_album_tracks_endpoint(rating_key: str):
 
 
 @router.get("/album/{rating_key}/track-check", response_model=TrackCheckOut)
-def get_album_track_check(rating_key: str):
+def get_album_track_check(rating_key: str, release_mbid: str | None = None):
     settings = get_settings()
     mb = MusicBrainzClient(settings)
     try:
         plex = get_plex_server(settings)
-        return get_missing_tracks_for_album(plex, mb, rating_key)
+        return get_missing_tracks_for_album(plex, mb, rating_key, release_mbid)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:

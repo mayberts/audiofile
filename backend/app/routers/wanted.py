@@ -80,6 +80,33 @@ def get_release_editions(release_group_mbid: str):
         mb.close()
 
 
+@router.get("/release-search", response_model=list[ReleaseEditionOut])
+def search_releases(artist: str, query: str):
+    """Free-text release search, not scoped to any one release-group --
+    backs "compare against a different edition" on an owned album, which
+    needs to reach releases MusicBrainz models under an entirely different
+    title (a bonus-disc reissue like "Album: Side B"), not just other
+    pressings of the exact same release-group."""
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        return mb.search_releases(artist, query)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("release search failed for %r/%r: %s", artist, query, exc)
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=503, detail="MusicBrainz is temporarily unavailable — try again in a moment."
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"MusicBrainz returned an error ({exc.response.status_code})."
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("release search failed for %r/%r", artist, query)
+        raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc
+    finally:
+        mb.close()
+
+
 @router.get("/cover-art/{release_group_mbid}")
 def get_cover_art(release_group_mbid: str):
     """Proxies Cover Art Archive art for the discography picker — same

@@ -149,6 +149,18 @@ class MusicBrainzClient:
         )
         return self._to_release_match(data)
 
+    def search_releases(self, artist: str, query: str, limit: int = 15) -> list[dict]:
+        """Free-text release search returning several candidate summaries,
+        not just the single top relevance match search_release() commits
+        to -- used to let someone browse for and pin a release that isn't
+        even the one search_release() would guess (a differently-titled
+        deluxe/bonus-disc reissue like "Album: Side B", which MusicBrainz
+        often models as its own separate release rather than another
+        edition of the same release-group)."""
+        lucene_query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(query)}"'
+        data = self._get("/release", {"query": lucene_query, "limit": limit})
+        return [self._to_release_summary(r) for r in data.get("releases", [])]
+
     def get_release_group_releases(self, release_group_mbid: str) -> list[dict]:
         """Every specific release (edition/pressing) MusicBrainz has under one
         release-group -- an album can easily have a dozen (different country

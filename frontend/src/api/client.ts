@@ -106,6 +106,8 @@ export interface TrackCheckOut {
   expected_total: number | null;
   owned_total: number;
   missing_tracks: MissingTrackOut[];
+  release_mbid: string | null;
+  release_title: string | null;
 }
 
 export interface PosterOut {
@@ -212,8 +214,14 @@ export const api = {
 
   getMissingAlbums: (artistRatingKey: string) =>
     request<MissingAlbumOut[]>(`/api/plex/artist/${artistRatingKey}/missing-albums`),
-  getTrackCheck: (albumRatingKey: string) =>
-    request<TrackCheckOut>(`/api/plex/album/${albumRatingKey}/track-check`),
+  getTrackCheck: (albumRatingKey: string, releaseMbid?: string | null) =>
+    request<TrackCheckOut>(
+      `/api/plex/album/${albumRatingKey}/track-check${releaseMbid ? `?release_mbid=${encodeURIComponent(releaseMbid)}` : ""}`,
+    ),
+  searchReleases: (artist: string, query: string) =>
+    request<ReleaseEditionOut[]>(
+      `/api/wanted/release-search?artist=${encodeURIComponent(artist)}&query=${encodeURIComponent(query)}`,
+    ),
   addMissingAlbumToWanted: (params: {
     artist: string;
     album: string;

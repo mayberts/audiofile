@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, LibraryAlbumOut, MissingTrackOut, TrackCheckOut, TrackOut } from "../api/client";
+import { api, LibraryAlbumOut, MissingTrackOut, ReleaseEditionOut, TrackCheckOut, TrackOut } from "../api/client";
 import ArtworkPicker from "../components/ArtworkPicker";
+import ReleaseSearchPicker from "../components/ReleaseSearchPicker";
 import { libraryStore } from "../libraryStore";
 
 function formatDuration(ms: number | null): string {
@@ -140,7 +141,7 @@ export default function AlbumDetailPage() {
       )}
 
       {albumEntry && tracks && tracks.length > 0 && (
-        <MissingTracksPanel artist={artistName} ratingKey={albumEntry.rating_key ?? ""} />
+        <MissingTracksPanel artist={artistName} albumName={albumName} ratingKey={albumEntry.rating_key ?? ""} />
       )}
 
       {showArtworkPicker && albumEntry?.rating_key && (
@@ -154,25 +155,49 @@ export default function AlbumDetailPage() {
   );
 }
 
-function MissingTracksPanel({ artist, ratingKey }: { artist: string; ratingKey: string }) {
+function MissingTracksPanel({
+  artist,
+  albumName,
+  ratingKey,
+}: {
+  artist: string;
+  albumName: string;
+  ratingKey: string;
+}) {
   const [result, setResult] = useState<TrackCheckOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = auto (search_release()'s best guess); set once someone picks a
+  // specific release via the search picker, e.g. a deluxe/bonus-disc
+  // reissue MusicBrainz lists under its own separate title.
+  const [releaseOverride, setReleaseOverride] = useState<{ mbid: string; title: string } | null>(null);
+  const [pickingRelease, setPickingRelease] = useState(false);
 
-  function check() {
+  function check(mbid?: string | null) {
     setLoading(true);
     setError(null);
     api
-      .getTrackCheck(ratingKey)
+      .getTrackCheck(ratingKey, mbid)
       .then(setResult)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
   }
 
+  function onPickRelease(release: ReleaseEditionOut) {
+    setPickingRelease(false);
+    setReleaseOverride({ mbid: release.release_mbid, title: release.title });
+    check(release.release_mbid);
+  }
+
+  function resetToAutomatic() {
+    setReleaseOverride(null);
+    check(null);
+  }
+
   return (
     <div style={{ marginTop: "1rem" }}>
       {!result && !loading && (
-        <button className="secondary" onClick={check} disabled={!ratingKey}>
+        <button className="secondary" onClick={() => check(releaseOverride?.mbid)} disabled={!ratingKey}>
           Check for Missing Tracks
         </button>
       )}
@@ -182,7 +207,7 @@ function MissingTracksPanel({ artist, ratingKey }: { artist: string; ratingKey: 
           <p className="error-text" style={{ margin: 0 }}>
             {error}
           </p>
-          <button className="secondary" style={{ marginTop: "0.7rem" }} onClick={check}>
+          <button className="secondary" style={{ marginTop: "0.7rem" }} onClick={() => check(releaseOverride?.mbid)}>
             Try again
           </button>
         </div>
@@ -190,19 +215,62 @@ function MissingTracksPanel({ artist, ratingKey }: { artist: string; ratingKey: 
       {result && !result.checked && (
         <div className="panel empty">Couldn't find this album on MusicBrainz to compare tracks.</div>
       )}
-      {result && result.checked && result.missing_tracks.length === 0 && (
-        <div className="panel empty">
-          Nothing missing — all {result.expected_total} tracks MusicBrainz lists for this release are here.
-        </div>
+      {result && result.checked && (
+        <>
+          <div className="row" style={{ justifyContent: "space-between", margin: "0.6rem 0" }}>
+            <span className="muted">
+              Comparing against: {result.release_title || "MusicBrainz's best match"}
+            </span>
+            <div className="row">
+              <button className="secondary" onClick={() => setPickingRelease(true)}>
+                Compare against a different edition
+              </button>
+              {releaseOverride && (
+                <button className="secondary" onClick={resetToAutomatic}>
+                  Reset to automatic match
+                </button>
+              )}
+            </div>
+          </div>
+          {result.missing_tracks.length === 0 && (
+            <div className="panel empty">
+              Nothing missing — all {result.expected_total} tracks MusicBrainz lists for this release are here.
+            </div>
+          )}
+          {result.missing_tracks.length > 0 && (
+            <MissingTracksTable
+              artist={artist}
+              album={result.release_title || albumName}
+              releaseMbid={result.release_mbid}
+              tracks={result.missing_tracks}
+            />
+          )}
+        </>
       )}
-      {result && result.checked && result.missing_tracks.length > 0 && (
-        <MissingTracksTable artist={artist} tracks={result.missing_tracks} />
+
+      {pickingRelease && (
+        <ReleaseSearchPicker
+          artist={artist}
+          initialQuery={albumName}
+          onClose={() => setPickingRelease(false)}
+          onPick={onPickRelease}
+        />
       )}
     </div>
   );
 }
 
-function MissingTracksTable({ artist, tracks }: { artist: string; tracks: MissingTrackOut[] }) {
+function MissingTracksTable({
+  artist,
+  album,
+  releaseMbid,
+  tracks,
+}: {
+  artist: string;
+  album: string;
+  releaseMbid: string | null;
+  tracks: MissingTrackOut[];
+}) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +279,7 @@ function MissingTracksTable({ artist, tracks }: { artist: string; tracks: Missin
     setPending(track.title);
     setError(null);
     try {
-      await api.createWanted({ artist, track: track.title });
+      await api.createWanted({ artist, album, track: track.title, release_mbid: releaseMbid });
       setAdded((prev) => new Set(prev).add(track.title));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

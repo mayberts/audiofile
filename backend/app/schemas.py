@@ -152,6 +152,8 @@ class TrackCheckOut(BaseModel):
     expected_total: Optional[int] = None
     owned_total: int
     missing_tracks: list[MissingTrackOut] = []
+    release_mbid: Optional[str] = None
+    release_title: Optional[str] = None
 
 
 class TestSlskdRequest(BaseModel):

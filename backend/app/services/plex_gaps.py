@@ -59,23 +59,44 @@ def _is_studio_album(rg: dict) -> bool:
     return not (secondary & SKIP_SECONDARY_TYPES)
 
 
-def get_missing_tracks_for_album(plex: PlexServer, mb: MusicBrainzClient, album_rating_key: str) -> dict:
+def get_missing_tracks_for_album(
+    plex: PlexServer, mb: MusicBrainzClient, album_rating_key: str, release_mbid: str | None = None
+) -> dict:
     """Compares the tracks Plex has for one album against MusicBrainz's
     canonical tracklist for that release — checked live, on demand, for just
     this one album (not a background scan), the same way missing-album
-    checks work per-artist."""
+    checks work per-artist.
+
+    A caller can pin an exact release_mbid (picked via a release search --
+    see search_releases()) to compare against instead of leaving it to
+    search_release()'s relevance-ranked guess. That's the only way to reach
+    a bonus-disc/deluxe reissue MusicBrainz models as its own separate
+    release with a different title ("Album: Side B") rather than another
+    edition of the same release-group -- guessing from this album's own
+    title would never find it."""
     album = plex.fetchItem(int(album_rating_key))
     owned_normalized = {_normalize_title(t.title) for t in album.tracks()}
+    empty = {
+        "checked": False,
+        "expected_total": None,
+        "owned_total": len(owned_normalized),
+        "missing_tracks": [],
+        "release_mbid": None,
+        "release_title": None,
+    }
 
-    release = mb.search_release(album.parentTitle, album.title)
-    if not release:
-        return {"checked": False, "expected_total": None, "owned_total": len(owned_normalized), "missing_tracks": []}
+    if release_mbid:
+        full_release = mb.get_release(release_mbid)
+    else:
+        release = mb.search_release(album.parentTitle, album.title)
+        if not release:
+            return empty
+        # search_release only returns summary release info — no per-track
+        # listing — so the actual tracklist needs a follow-up lookup.
+        full_release = mb.get_release(release.release_mbid)
 
-    # search_release only returns summary release info — no per-track
-    # listing — so the actual tracklist needs a follow-up lookup.
-    full_release = mb.get_release(release.release_mbid)
     if not full_release or not full_release.tracks:
-        return {"checked": False, "expected_total": None, "owned_total": len(owned_normalized), "missing_tracks": []}
+        return empty
 
     missing = []
     for t in full_release.tracks:
@@ -89,6 +110,8 @@ def get_missing_tracks_for_album(plex: PlexServer, mb: MusicBrainzClient, album_
         "expected_total": len(full_release.tracks),
         "owned_total": len(owned_normalized),
         "missing_tracks": missing,
+        "release_mbid": full_release.release_mbid,
+        "release_title": full_release.title,
     }
 
 

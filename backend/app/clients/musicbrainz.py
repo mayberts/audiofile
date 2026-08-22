@@ -53,6 +53,37 @@ class TrackMetadata:
     release_group_mbid: Optional[str] = None
 
 
+# MusicBrainz's release search ranks purely by text relevance, with no
+# regard for what kind of release something is -- a single sharing its
+# parent album's exact title ("Sweat" the song vs "Sweat" the album) can
+# easily outrank the album itself. Picking that result silently compares a
+# library against a 1-track release instead of the real tracklist, which
+# always reports "nothing missing" no matter how much of the album is
+# actually absent. A release-group's primary type ("Album" vs "Single"/"EP"/
+# etc.) and its track count are both included right in the search response,
+# so the true album can be preferred over a same-titled single without an
+# extra lookup per candidate.
+_PREFERRED_PRIMARY_TYPES = {"Album", "EP"}
+
+
+def _release_track_count(release: dict) -> int:
+    media = release.get("media") or []
+    return release.get("track-count") or sum(m.get("track-count") or 0 for m in media)
+
+
+def _release_rank(release: dict) -> tuple[bool, int]:
+    release_group = release.get("release-group") or {}
+    is_preferred_type = (
+        release_group.get("primary-type") in _PREFERRED_PRIMARY_TYPES
+        and not release_group.get("secondary-types")
+    )
+    # Among same-type candidates, the fullest edition (e.g. a deluxe
+    # reissue with bonus tracks) is the most useful one to compare a
+    # library against -- it can only ever flag more of what's really
+    # missing, never less.
+    return (is_preferred_type, _release_track_count(release))
+
+
 @dataclass
 class ReleaseMatch:
     release_mbid: str
@@ -104,11 +135,11 @@ class MusicBrainzClient:
 
     def search_release(self, artist: str, album: str) -> Optional[ReleaseMatch]:
         query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(album)}"'
-        data = self._get("/release", {"query": query, "limit": 5})
+        data = self._get("/release", {"query": query, "limit": 10})
         releases = data.get("releases", [])
         if not releases:
             return None
-        best = releases[0]
+        best = max(releases, key=_release_rank)
         return self._to_release_match(best)
 
     def get_release(self, release_mbid: str) -> Optional[ReleaseMatch]:

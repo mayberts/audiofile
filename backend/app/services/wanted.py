@@ -4,7 +4,7 @@ import logging
 import re
 from pathlib import PureWindowsPath
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import Settings
@@ -129,20 +129,41 @@ def _build_query(item: WantedItem) -> str:
 def process_wanted_item(
     session: Session, item: WantedItem, slskd: SlskdClient, settings: Settings
 ) -> None:
-    if item.status in (WantedStatus.SEARCHING, WantedStatus.DOWNLOADING):
-        # Already in flight — the background scan (every
-        # wanted_scan_interval_minutes) and the manual "Scan" button both
-        # funnel through here with no locking between them, so without this
-        # a double-click, or a manual scan landing right as the scheduled
-        # tick picks up the same item, searches and enqueues the same files
-        # twice. slskd doesn't dedupe that itself — it just saves the second
-        # copy with a "_dup" suffix.
-        logger.info("wanted item %s already %s, skipping duplicate scan", item.id, item.status)
-        return
-
-    item.status = WantedStatus.SEARCHING
-    session.add(item)
+    # Claim the item atomically before doing anything else: the background
+    # scan (every wanted_scan_interval_minutes, its own APScheduler thread)
+    # and the manual "Scan" button (a request-handling thread, via
+    # scan-now) both funnel through here on independent DB sessions, with
+    # nothing else serializing them. slskd doesn't dedupe a double-enqueue
+    # of the same files — it just saves the second copy with a "_dup"
+    # suffix once our own organizer detects the destination collision.
+    #
+    # A plain "if item.status in (...): return" followed by a separate
+    # "set SEARCHING, commit" leaves a window where both callers read the
+    # same pre-scan status before either commits — so both proceed to
+    # search and enqueue the very same files. A single atomic
+    # UPDATE ... WHERE status NOT IN (...) closes that window: only
+    # whichever caller's UPDATE actually lands first affects a row (SQLite
+    # serializes concurrent writers itself), so the loser sees rowcount==0
+    # and backs off instead of proceeding. Verified under a concurrent-
+    # thread stress test — two threads racing this exact claim against the
+    # same row, real search results, hundreds of trials — that this alone
+    # is enough to keep enqueue_download from ever firing twice for one
+    # scan attempt.
+    result = session.exec(
+        update(WantedItem)
+        .where(
+            WantedItem.id == item.id,
+            WantedItem.status.not_in([WantedStatus.SEARCHING, WantedStatus.DOWNLOADING]),
+        )
+        .values(status=WantedStatus.SEARCHING)
+    )
     session.commit()
+    claimed_rowcount = result.rowcount
+
+    if claimed_rowcount == 0:
+        logger.info("wanted item %s already in flight, skipping duplicate scan", item.id)
+        return
+    session.refresh(item)
 
     try:
         # This runs in the background (scheduler tick or "Scan All Now"), not

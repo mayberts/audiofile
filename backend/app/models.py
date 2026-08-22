@@ -21,6 +21,18 @@ class WantedSource(str, Enum):
     PLEX_GAP = "plex_gap"
 
 
+def compute_wanted_dedup_key(artist: str, album: Optional[str], track: Optional[str]) -> str:
+    """Shared by WantedItem creation (routers/wanted.py) and the startup
+    migration that backfills/deduplicates existing rows (database.py) --
+    both need the exact same normalization or the unique index they rely
+    on would treat equivalent wants as distinct."""
+
+    def norm(value: Optional[str]) -> str:
+        return value.strip().lower() if value else ""
+
+    return f"{norm(artist)}\x1e{norm(album)}\x1e{norm(track)}"
+
+
 class WantedItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     artist: str
@@ -32,6 +44,17 @@ class WantedItem(SQLModel, table=True):
     # release-editions picker -- when set, search + tagging resolve against
     # this exact release instead of guessing one from artist/album text.
     release_mbid: Optional[str] = None
+    # Normalized "artist|album|track" -- the unique=True below (which
+    # create_all() turns into a real UNIQUE constraint for a fresh
+    # install; database.py's migration adds the equivalent index by hand
+    # for an existing one) is what actually prevents two near-simultaneous
+    # "Add" requests for the same want from both seeing "nothing exists
+    # yet" and each creating their own row. A read-then-insert check alone
+    # doesn't close that window (same class of race as process_wanted_item's
+    # scan claim) -- each duplicate row then runs its own fully
+    # independent, legitimate search+download+organize cycle, colliding on
+    # the same destination files.
+    dedup_key: Optional[str] = Field(default=None, unique=True)
     status: WantedStatus = Field(default=WantedStatus.WANTED)
     source: WantedSource = Field(default=WantedSource.MANUAL)
     last_error: Optional[str] = None

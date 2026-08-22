@@ -4,13 +4,14 @@ import logging
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlmodel import Session, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient
 from ..config import get_settings
 from ..database import get_session
-from ..models import DownloadRecord, WantedItem
+from ..models import DownloadRecord, WantedItem, compute_wanted_dedup_key
 from ..schemas import MissingAlbumOut, ReleaseEditionOut, WantedCreate, WantedOut
 from ..services.plex_gaps import get_artist_discography, get_owned_album_titles_from_snapshot
 from ..services.wanted import process_all_wanted, process_wanted_item
@@ -127,39 +128,55 @@ def get_cover_art(release_group_mbid: str):
     )
 
 
-def _norm(value: str | None) -> str | None:
-    return value.strip().lower() if value else None
-
-
 @router.post("", response_model=WantedOut)
 def create_wanted(payload: WantedCreate, session: Session = Depends(get_session)):
     # A successfully-downloaded want is deleted (see _sync_wanted_item), so
     # anything still in the table represents an open or retryable want —
     # matching one here means this exact artist/album/track is already
     # tracked, so re-adding it (e.g. clicking "Add" twice, or picking the
-    # same album from two different flows) reuses that row instead of
+    # same album from two different flows) should reuse that row instead of
     # kicking off a second, independent search+download for the same thing.
-    candidates = session.exec(
-        select(WantedItem).where(func.lower(WantedItem.artist) == _norm(payload.artist))
-    ).all()
-    for existing in candidates:
-        if _norm(existing.album) == _norm(payload.album) and _norm(existing.track) == _norm(payload.track):
-            # A re-add with a specific edition picked this time (e.g. someone
-            # re-adding after removing to switch pressings) should stick --
-            # otherwise the picked release_mbid would be silently dropped in
-            # favor of whatever this stale row already had (or didn't).
-            if payload.release_mbid and existing.release_mbid != payload.release_mbid:
-                existing.release_mbid = payload.release_mbid
-                session.add(existing)
-                session.commit()
-                session.refresh(existing)
-            return existing
-
+    #
+    # Insert-first, not check-then-insert: two near-simultaneous requests
+    # for the same want (a fast double-click, a page reload racing a
+    # pending submit) could otherwise both run the "does this exist"
+    # check before either commits its insert, both see nothing, and both
+    # create their own row — same class of race as process_wanted_item's
+    # scan claim, just on creation instead of on scanning. Each duplicate
+    # row then runs its own fully independent, legitimate
+    # search+download+organize cycle, colliding on the same destination
+    # files. Relying on the database's own UNIQUE constraint on dedup_key
+    # (see database.py's migration) instead of a prior SELECT closes that
+    # window: only one INSERT for a given key can ever succeed, so the
+    # loser's IntegrityError is the signal to fetch and reuse the row the
+    # winner just created.
+    dedup_key = compute_wanted_dedup_key(payload.artist, payload.album, payload.track)
     item = WantedItem(
-        artist=payload.artist, album=payload.album, track=payload.track, release_mbid=payload.release_mbid
+        artist=payload.artist,
+        album=payload.album,
+        track=payload.track,
+        release_mbid=payload.release_mbid,
+        dedup_key=dedup_key,
     )
     session.add(item)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.exec(select(WantedItem).where(WantedItem.dedup_key == dedup_key)).first()
+        if existing is None:
+            raise
+        # A re-add with a specific edition picked this time (e.g. someone
+        # re-adding after removing to switch pressings) should stick --
+        # otherwise the picked release_mbid would be silently dropped in
+        # favor of whatever this stale row already had (or didn't).
+        if payload.release_mbid and existing.release_mbid != payload.release_mbid:
+            existing.release_mbid = payload.release_mbid
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+        return existing
+
     session.refresh(item)
     return item
 

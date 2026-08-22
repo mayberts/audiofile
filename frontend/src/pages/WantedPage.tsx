@@ -8,6 +8,7 @@ export default function WantedPage() {
   const [album, setAlbum] = useState("");
   const [track, setTrack] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [scanningAll, setScanningAll] = useState(false);
   const [pickingArtist, setPickingArtist] = useState<string | null>(null);
   const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
@@ -29,6 +30,7 @@ export default function WantedPage() {
 
   async function onAdd(e: FormEvent) {
     e.preventDefault();
+    if (adding) return; // a fast double-click/double-Enter shouldn't fire this twice
     const artistName = artist.trim();
     if (!artistName) return;
 
@@ -40,6 +42,7 @@ export default function WantedPage() {
       return;
     }
 
+    setAdding(true);
     try {
       await api.createWanted({
         artist: artistName,
@@ -52,6 +55,8 @@ export default function WantedPage() {
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAdding(false);
     }
   }
 
@@ -104,7 +109,9 @@ export default function WantedPage() {
           value={track}
           onChange={(e) => setTrack(e.target.value)}
         />
-        <button type="submit">Add</button>
+        <button type="submit" disabled={adding}>
+          {adding ? "Adding..." : "Add"}
+        </button>
         <button type="button" className="secondary" onClick={onScanAll} disabled={scanningAll}>
           {scanningAll ? "Scanning..." : "Scan All Now"}
         </button>

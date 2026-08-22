@@ -5,6 +5,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
@@ -20,7 +21,7 @@ from ..clients.plex import (
 )
 from ..config import get_settings
 from ..database import get_session
-from ..models import LibraryAlbum, WantedItem, WantedSource
+from ..models import LibraryAlbum, WantedItem, WantedSource, compute_wanted_dedup_key
 from ..schemas import (
     AddMissingAlbumRequest,
     LibraryAlbumOut,
@@ -111,15 +112,30 @@ def get_missing_albums(rating_key: str):
 
 @router.post("/missing-album/add-to-wanted", response_model=WantedOut)
 def add_missing_album_to_wanted(payload: AddMissingAlbumRequest, session: Session = Depends(get_session)):
+    # Same insert-first, race-proof dedup as create_wanted (see its
+    # comment) -- this endpoint used to have no dedup check at all, so two
+    # near-simultaneous "Add" clicks here would always create two
+    # independent rows, each running its own full search+download+organize
+    # cycle for the same album.
+    dedup_key = compute_wanted_dedup_key(payload.artist, payload.album, None)
     wanted = WantedItem(
         artist=payload.artist,
         album=payload.album,
         release_group_mbid=payload.release_group_mbid,
         release_mbid=payload.release_mbid,
         source=WantedSource.PLEX_GAP,
+        dedup_key=dedup_key,
     )
     session.add(wanted)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.exec(select(WantedItem).where(WantedItem.dedup_key == dedup_key)).first()
+        if existing is None:
+            raise
+        return existing
+
     session.refresh(wanted)
     return wanted
 

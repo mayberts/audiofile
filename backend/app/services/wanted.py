@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import PureWindowsPath
 
 from sqlmodel import Session, select, update
 
@@ -11,96 +10,10 @@ from ..clients.slskd import SlskdClient, SlskdError
 from ..config import Settings
 from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedStatus
 from . import search as search_service
+from .track_parsing import extract_track_number as _extract_track_number
+from .track_parsing import extract_track_title as _extract_track_title
 
 logger = logging.getLogger(__name__)
-
-# Matches a leading "01 - ", "01. ", "01_", "1-01 - " track marker — the
-# near-universal prefix on a Soulseek folder-rip filename once the artist
-# and album are already established by the folder itself. The optional
-# leading group handles disc-qualified numbering ("1-01", "2-05"), common
-# on multi-disc "Special Edition" releases (a bonus remix disc, say) —
-# without it, a filename like "1-01 - Pop.flac" has its DISC digit
-# mistaken for the track number by a plain "first standalone 1-2 digit
-# token" search (it finds "1" before ever reaching "01"), so every track
-# on a disc ends up parsed as if it were track "1", "2", etc. — silently
-# collapsing an entire disc's worth of files onto one tagged track.
-_LEADING_TRACK_MARKER_RE = re.compile(r"^\s*(?:\d{1,2}[-.])?(\d{1,2})[\s._-]+")
-
-# Fallback for a filename with no clean leading marker — a standalone 1-2
-# digit token anywhere in the name (e.g. "Artist_Album_05_Title").
-_EMBEDDED_TRACK_NUMBER_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
-
-_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _strip_known_prefix(stem: str, value: str | None) -> str:
-    """Strips `value` (the wanted item's artist or album) off the front of
-    `stem` if it's there, comparing letters/digits only, case-insensitive
-    — a filename can't literally contain whatever MusicBrainz calls
-    something if that includes a character Windows forbids in a path
-    ("*NSYNC" shows up on disk as "-NSYNC", "NSYNC", etc.), so comparing
-    the literal strings would silently fail to recognize the very prefix
-    it's meant to strip. A no-op (returns stem unchanged) if `value`
-    isn't actually a prefix of stem."""
-    if not value:
-        return stem
-    target = _NON_ALNUM_RE.sub("", value.lower())
-    if not target:
-        return stem
-    normalized = ""
-    cut = 0
-    for i, ch in enumerate(stem):
-        if ch.isalnum():
-            normalized += ch.lower()
-        cut = i + 1
-        if normalized == target:
-            break
-    else:
-        return stem
-    if normalized != target:
-        return stem
-    remainder = stem[cut:]
-    sep = re.match(r"[\s._-]+", remainder)
-    return remainder[sep.end():] if sep else remainder
-
-
-def _strip_repeated_prefix(filename: str, artist: str, album: str | None) -> str:
-    """Some rips repeat "Artist - Album - " (or just "Artist - ") on every
-    filename in the batch, ahead of the actual track marker — strip that
-    off first so the marker-parsing below still finds it leading. A no-op
-    when the filename doesn't actually have that prefix."""
-    stem = PureWindowsPath(filename).stem
-    stem = _strip_known_prefix(stem, artist)
-    stem = _strip_known_prefix(stem, album)
-    return stem
-
-
-def _extract_track_number(filename: str, artist: str = "", album: str | None = None) -> int | None:
-    stem = _strip_repeated_prefix(filename, artist, album)
-    match = _LEADING_TRACK_MARKER_RE.match(stem)
-    if match:
-        return int(match.group(1))
-    match = _EMBEDDED_TRACK_NUMBER_RE.search(stem)
-    return int(match.group(1)) if match else None
-
-
-def _extract_track_title(filename: str, artist: str, album: str | None = None) -> str | None:
-    """Best-effort track title guessed from the filename, used to match
-    against MusicBrainz's tracklist by title instead of by position.
-
-    Position-only matching ties tagging to whichever specific release
-    edition happened to come back from the MusicBrainz search — for an
-    album with many regional/bonus-track pressings (a common case), that
-    edition's track count and order won't necessarily line up with what
-    a given Soulseek peer actually has, silently mislabeling tracks.
-    Matching by title instead works regardless of which edition's
-    tracklist we're comparing against, since a bonus-track edition adds
-    tracks rather than renaming the ones a plainer rip already has."""
-    stem = _strip_repeated_prefix(filename, artist, album)
-    match = _LEADING_TRACK_MARKER_RE.match(stem)
-    title = stem[match.end():] if match else stem
-    return title.strip() or None
-
 
 # Soulseek uploads come almost exclusively from Windows clients, so a
 # folder/file name can never literally contain a character Windows forbids
@@ -205,13 +118,18 @@ def process_wanted_item(
         # known, exact tracklist -- without this, "most tracks wins" always
         # preferred a peer sharing a big deluxe/extended-mix reissue over
         # one sharing exactly the edition that was actually picked, no
-        # matter how deliberately it was chosen.
-        expected_track_count = None
+        # matter how deliberately it was chosen. Matching by title (not
+        # just comparing folder sizes) also handles a single peer's folder
+        # that bundles the plain tracks together with a full set of bonus/
+        # extended-mix versions -- there's no smaller folder to prefer
+        # over it in that case, so the titles themselves are what narrow
+        # it down to just the tracks actually wanted.
+        expected_titles: list[str] = []
         if item.release_mbid:
             try:
                 pinned_release = mb.get_release(item.release_mbid)
                 if pinned_release and pinned_release.tracks:
-                    expected_track_count = len(pinned_release.tracks)
+                    expected_titles = [t.get("title") or "" for t in pinned_release.tracks]
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "could not look up pinned release %s for wanted item %s; falling back to "
@@ -220,7 +138,7 @@ def process_wanted_item(
                     item.id,
                 )
         folder = search_service.best_album_folder(
-            results, settings, expected_track_count=expected_track_count
+            results, settings, expected_titles=expected_titles, artist=item.artist, album=item.album
         )
         if folder:
             matches = folder

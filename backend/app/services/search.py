@@ -4,6 +4,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 from ..config import Settings
 from ..schemas import SearchFile
+from .track_parsing import extract_track_title, normalize_title
 
 AUDIO_EXTENSIONS = {"flac", "mp3", "m4a", "aac", "ogg", "wav", "alac"}
 
@@ -141,15 +142,56 @@ def group_by_folder(results: list[SearchFile]) -> dict[tuple[str, str], list[Sea
     return groups
 
 
+def filter_files_matching_titles(
+    files: list[SearchFile], artist: str, album: str | None, expected_titles: list[str]
+) -> list[SearchFile]:
+    """Keeps only the files whose extracted track title matches one of
+    `expected_titles` (a specific release's own tracklist, picked by hand
+    via the release-editions picker) -- at most one file per expected
+    title, the best-scoring one if several files claim the same title.
+
+    A single peer's shared folder can bundle more than one edition of the
+    same album together (a plain rip alongside a full set of "(extended
+    mix)" versions, say) -- picking "the biggest folder" or even "the
+    folder closest to the expected track count" still grabs the whole
+    bundle when that's the only (or largest) folder available, since
+    there's nothing smaller to prefer it over. Matching by title instead
+    finds exactly the tracks that are actually wanted regardless of what
+    else happens to be sitting alongside them in the same share."""
+    wanted = {normalize_title(t) for t in expected_titles if t}
+    if not wanted:
+        return files
+
+    best_by_title: dict[str, SearchFile] = {}
+    for f in files:
+        title = normalize_title(extract_track_title(f.filename, artist, album))
+        if title not in wanted:
+            continue
+        current = best_by_title.get(title)
+        if current is None or f.score > current.score:
+            best_by_title[title] = f
+    return list(best_by_title.values())
+
+
 def best_album_folder(
     results: list[SearchFile],
     settings: Settings,
     min_tracks: int = 2,
-    expected_track_count: int | None = None,
+    expected_titles: list[str] | None = None,
+    artist: str = "",
+    album: str | None = None,
 ) -> list[SearchFile] | None:
     """Picks the (username, folder) that looks most like a complete album
     share in the preferred format/bitrate, rather than a single stray file
     or a "good enough" folder in the wrong format.
+
+    When a specific release was pinned by hand (expected_titles set), every
+    candidate file is first narrowed down to just the ones matching one of
+    that release's own track titles — see filter_files_matching_titles for
+    why that's needed instead of just comparing folder sizes. Grouping and
+    ranking then run on that narrowed set, so a peer's folder that mixes in
+    bonus/extended-mix tracks alongside the plain ones only ever contributes
+    its matching tracks, not the whole bundle.
 
     Folders where every file meets the configured quality bar are
     considered first and exclusively — a flac-only setting means an mp3
@@ -158,20 +200,17 @@ def best_album_folder(
     if no folder clears the bar at all does the full candidate set get
     considered, so a real album is still preferred over nothing.
 
-    Within whichever pool is used: if a specific release was pinned by hand
-    (expected_track_count set), the folder whose track count is CLOSEST to
-    it wins first — otherwise "most tracks wins" means a peer sharing a
-    26-track deluxe/extended-mix reissue always beats one sharing exactly
-    the 13-track edition someone actually asked for, since more tracks
-    always used to look "more complete" regardless of what was wanted.
-    Without a pinned release, most tracks first is still the right default
-    (a complete album beats a partial one) since there's no specific
-    expectation to compare against. Either way, folders tied on that
-    primary key fall back to: the peer least likely to leave the download
-    stuck (free slot, short queue, fast upload), then best average
-    file-quality score. Returns None if nothing has at least min_tracks
-    files, so the caller can fall back to a single-file best_match instead
-    of forcing a "whole folder" result out of scraps."""
+    Within whichever pool is used: most tracks first (a complete album, or
+    a more complete match against a pinned release's tracklist, beats a
+    partial one), then — among folders tied on track count — the peer
+    least likely to leave the download stuck (free slot, short queue, fast
+    upload), then best average file-quality score as a final tiebreak.
+    Returns None if nothing has at least min_tracks files, so the caller
+    can fall back to a single-file best_match instead of forcing a "whole
+    folder" result out of scraps."""
+    if expected_titles:
+        results = filter_files_matching_titles(results, artist, album, expected_titles)
+
     groups = group_by_folder(results)
     all_candidates = [files for files in groups.values() if len(files) >= min_tracks]
     if not all_candidates:
@@ -183,8 +222,7 @@ def best_album_folder(
     def group_key(files: list[SearchFile]) -> tuple:
         scores = [score_result(f, settings.preferred_format_list, settings.min_bitrate_kbps) for f in files]
         avg_quality = sum(scores) / len(scores)
-        completeness = -abs(len(files) - expected_track_count) if expected_track_count else len(files)
-        return (completeness, *_peer_priority(files[0]), avg_quality)
+        return (len(files), *_peer_priority(files[0]), avg_quality)
 
     pool.sort(key=group_key, reverse=True)
     return pool[0]

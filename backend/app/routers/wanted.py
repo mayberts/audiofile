@@ -212,10 +212,12 @@ def scan_now(wanted_id: int, session: Session = Depends(get_session)):
 
     settings = get_settings()
     slskd = SlskdClient.from_settings(settings)
+    mb = MusicBrainzClient(settings)
     try:
-        process_wanted_item(session, item, slskd, settings)
+        process_wanted_item(session, item, slskd, settings, mb)
     finally:
         slskd.close()
+        mb.close()
     session.refresh(item)
     return item
 
@@ -229,11 +231,13 @@ def scan_all(background_tasks: BackgroundTasks):
         from ..database import engine
 
         slskd = SlskdClient.from_settings(settings)
+        mb = MusicBrainzClient(settings)
         try:
             with _Session(engine) as session:
-                process_all_wanted(session, slskd, settings)
+                process_all_wanted(session, slskd, settings, mb)
         finally:
             slskd.close()
+            mb.close()
 
     background_tasks.add_task(_run)
     return {"status": "scan started"}

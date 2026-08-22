@@ -6,6 +6,7 @@ from pathlib import PureWindowsPath
 
 from sqlmodel import Session, select, update
 
+from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import Settings
 from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedStatus
@@ -127,7 +128,7 @@ def _build_query(item: WantedItem) -> str:
 
 
 def process_wanted_item(
-    session: Session, item: WantedItem, slskd: SlskdClient, settings: Settings
+    session: Session, item: WantedItem, slskd: SlskdClient, settings: Settings, mb: MusicBrainzClient
 ) -> None:
     # Claim the item atomically before doing anything else: the background
     # scan (every wanted_scan_interval_minutes, its own APScheduler thread)
@@ -200,7 +201,27 @@ def process_wanted_item(
     is_album_want = bool(item.album) and not item.track
     matches: list[search_service.SearchFile] = []
     if is_album_want:
-        folder = search_service.best_album_folder(results, settings)
+        # A release picked by hand (see the release-editions picker) has a
+        # known, exact tracklist -- without this, "most tracks wins" always
+        # preferred a peer sharing a big deluxe/extended-mix reissue over
+        # one sharing exactly the edition that was actually picked, no
+        # matter how deliberately it was chosen.
+        expected_track_count = None
+        if item.release_mbid:
+            try:
+                pinned_release = mb.get_release(item.release_mbid)
+                if pinned_release and pinned_release.tracks:
+                    expected_track_count = len(pinned_release.tracks)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "could not look up pinned release %s for wanted item %s; falling back to "
+                    "most-tracks-wins folder selection",
+                    item.release_mbid,
+                    item.id,
+                )
+        folder = search_service.best_album_folder(
+            results, settings, expected_track_count=expected_track_count
+        )
         if folder:
             matches = folder
     if not matches:
@@ -268,7 +289,7 @@ def process_wanted_item(
         session.commit()
 
 
-def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings) -> int:
+def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings, mb: MusicBrainzClient) -> int:
     # NOT_FOUND is retried alongside WANTED, not just skipped forever: Soulseek
     # is a live P2P network, so "no matching files" from one search is often
     # just whichever peers happened to be online at that moment, not proof the
@@ -278,5 +299,5 @@ def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings)
         select(WantedItem).where(WantedItem.status.in_([WantedStatus.WANTED, WantedStatus.NOT_FOUND]))
     ).all()
     for item in items:
-        process_wanted_item(session, item, slskd, settings)
+        process_wanted_item(session, item, slskd, settings, mb)
     return len(items)

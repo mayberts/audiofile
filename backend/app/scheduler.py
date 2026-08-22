@@ -70,15 +70,17 @@ def poll_downloads_job() -> None:
 def process_wanted_job() -> None:
     settings = get_settings()
     slskd = SlskdClient.from_settings(settings)
+    mb = MusicBrainzClient(settings)
     try:
         with Session(engine) as session:
-            count = wanted_service.process_all_wanted(session, slskd, settings)
+            count = wanted_service.process_all_wanted(session, slskd, settings, mb)
             if count:
                 logger.info("processed %s wanted item(s)", count)
     except Exception:  # noqa: BLE001
         logger.exception("process_wanted_job failed")
     finally:
         slskd.close()
+        mb.close()
 
 
 def start_scheduler() -> BackgroundScheduler:

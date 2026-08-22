@@ -28,6 +28,10 @@ class WantedItem(SQLModel, table=True):
     track: Optional[str] = None
     mbid: Optional[str] = None
     release_group_mbid: Optional[str] = None
+    # A specific release (edition/pressing) picked by hand, e.g. via the
+    # release-editions picker -- when set, search + tagging resolve against
+    # this exact release instead of guessing one from artist/album text.
+    release_mbid: Optional[str] = None
     status: WantedStatus = Field(default=WantedStatus.WANTED)
     source: WantedSource = Field(default=WantedSource.MANUAL)
     last_error: Optional[str] = None
@@ -77,6 +81,10 @@ class DownloadRecord(SQLModel, table=True):
     # filename, used to match against the release's actual tracklist since
     # there's no single hint_track title for a whole-folder grab.
     hint_track_number: Optional[int] = None
+    # Carried over from the wanted item's own release_mbid (if one was
+    # picked by hand) so tagging resolves against that exact release
+    # instead of re-guessing one from hint_artist/hint_album text.
+    hint_release_mbid: Optional[str] = None
     mbid: Optional[str] = None
 
     status: DownloadStatus = Field(default=DownloadStatus.QUEUED)

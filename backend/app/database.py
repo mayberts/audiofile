@@ -28,6 +28,14 @@ def _add_missing_columns() -> None:
         if "hint_track_number" not in existing:
             conn.exec_driver_sql("ALTER TABLE downloadrecord ADD COLUMN hint_track_number INTEGER")
             conn.commit()
+        if "hint_release_mbid" not in existing:
+            conn.exec_driver_sql("ALTER TABLE downloadrecord ADD COLUMN hint_release_mbid VARCHAR")
+            conn.commit()
+
+        existing_wanted = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(wanteditem)")}
+        if "release_mbid" not in existing_wanted:
+            conn.exec_driver_sql("ALTER TABLE wanteditem ADD COLUMN release_mbid VARCHAR")
+            conn.commit()
 
 
 def get_session():

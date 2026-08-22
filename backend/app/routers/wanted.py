@@ -11,7 +11,7 @@ from ..clients.slskd import SlskdClient
 from ..config import get_settings
 from ..database import get_session
 from ..models import DownloadRecord, WantedItem
-from ..schemas import MissingAlbumOut, WantedCreate, WantedOut
+from ..schemas import MissingAlbumOut, ReleaseEditionOut, WantedCreate, WantedOut
 from ..services.plex_gaps import get_artist_discography, get_owned_album_titles_from_snapshot
 from ..services.wanted import process_all_wanted, process_wanted_item
 
@@ -54,6 +54,32 @@ def get_discography(artist: str, session: Session = Depends(get_session)):
         mb.close()
 
 
+@router.get("/release-editions", response_model=list[ReleaseEditionOut])
+def get_release_editions(release_group_mbid: str):
+    """Backs the "choose a specific edition" picker -- every real release
+    MusicBrainz has under one release-group, so someone can pick an exact
+    pressing (a plain 11-track CD vs. a 26-track deluxe reissue) instead of
+    leaving it to a relevance-ranked guess."""
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        return mb.get_release_group_releases(release_group_mbid)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("release-editions lookup failed for %r: %s", release_group_mbid, exc)
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=503, detail="MusicBrainz is temporarily unavailable — try again in a moment."
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"MusicBrainz returned an error ({exc.response.status_code})."
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("release-editions lookup failed for %r", release_group_mbid)
+        raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc
+    finally:
+        mb.close()
+
+
 @router.get("/cover-art/{release_group_mbid}")
 def get_cover_art(release_group_mbid: str):
     """Proxies Cover Art Archive art for the discography picker — same
@@ -91,9 +117,20 @@ def create_wanted(payload: WantedCreate, session: Session = Depends(get_session)
     ).all()
     for existing in candidates:
         if _norm(existing.album) == _norm(payload.album) and _norm(existing.track) == _norm(payload.track):
+            # A re-add with a specific edition picked this time (e.g. someone
+            # re-adding after removing to switch pressings) should stick --
+            # otherwise the picked release_mbid would be silently dropped in
+            # favor of whatever this stale row already had (or didn't).
+            if payload.release_mbid and existing.release_mbid != payload.release_mbid:
+                existing.release_mbid = payload.release_mbid
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
             return existing
 
-    item = WantedItem(artist=payload.artist, album=payload.album, track=payload.track)
+    item = WantedItem(
+        artist=payload.artist, album=payload.album, track=payload.track, release_mbid=payload.release_mbid
+    )
     session.add(item)
     session.commit()
     session.refresh(item)

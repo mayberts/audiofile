@@ -61,6 +61,7 @@ class WantedCreate(BaseModel):
     artist: str
     album: Optional[str] = None
     track: Optional[str] = None
+    release_mbid: Optional[str] = None
 
 
 class WantedOut(BaseModel):
@@ -68,12 +69,27 @@ class WantedOut(BaseModel):
     artist: str
     album: Optional[str] = None
     track: Optional[str] = None
+    release_mbid: Optional[str] = None
     status: WantedStatus
     source: WantedSource
     last_error: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class ReleaseEditionOut(BaseModel):
+    release_mbid: str
+    title: str
+    disambiguation: Optional[str] = None
+    date: Optional[str] = None
+    country: Optional[str] = None
+    track_count: int
+    format: Optional[str] = None
+    label: Optional[str] = None
+    catalog_number: Optional[str] = None
+    barcode: Optional[str] = None
+    status: Optional[str] = None
 
 
 class LibraryAlbumOut(BaseModel):
@@ -107,6 +123,7 @@ class AddMissingAlbumRequest(BaseModel):
     artist: str
     album: str
     release_group_mbid: Optional[str] = None
+    release_mbid: Optional[str] = None
 
 
 class MissingTrackOut(BaseModel):

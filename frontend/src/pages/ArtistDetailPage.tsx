@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
 import ArtworkPicker from "../components/ArtworkPicker";
+import ReleasePicker from "../components/ReleasePicker";
 import { libraryStore } from "../libraryStore";
 
 export default function ArtistDetailPage() {
@@ -174,8 +175,9 @@ function MissingAlbumsTable({ artist, albums }: { artist: string; albums: Missin
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pickingEditionFor, setPickingEditionFor] = useState<MissingAlbumOut | null>(null);
 
-  async function onAdd(album: MissingAlbumOut) {
+  async function onAdd(album: MissingAlbumOut, releaseMbid?: string | null) {
     setPending(album.album);
     setError(null);
     try {
@@ -183,6 +185,7 @@ function MissingAlbumsTable({ artist, albums }: { artist: string; albums: Missin
         artist,
         album: album.album,
         release_group_mbid: album.release_group_mbid,
+        release_mbid: releaseMbid,
       });
       setAdded((prev) => new Set(prev).add(album.album));
     } catch (err) {
@@ -210,19 +213,43 @@ function MissingAlbumsTable({ artist, albums }: { artist: string; albums: Missin
               <tr key={a.album}>
                 <td>{a.album}</td>
                 <td className="muted">{a.first_release_date || "—"}</td>
-                <td>
+                <td className="row" style={{ justifyContent: "flex-end" }}>
                   {added.has(a.album) ? (
                     <span className="badge downloaded">In wanted list</span>
                   ) : (
-                    <button className="secondary" onClick={() => onAdd(a)} disabled={pending === a.album}>
-                      {pending === a.album ? "..." : "Add to Wanted"}
-                    </button>
+                    <>
+                      {a.release_group_mbid && (
+                        <button
+                          className="secondary"
+                          onClick={() => setPickingEditionFor(a)}
+                          disabled={pending === a.album}
+                        >
+                          Pick edition
+                        </button>
+                      )}
+                      <button className="secondary" onClick={() => onAdd(a)} disabled={pending === a.album}>
+                        {pending === a.album ? "..." : "Add to Wanted"}
+                      </button>
+                    </>
                   )}
                 </td>
               </tr>
             ))}
         </tbody>
       </table>
+
+      {pickingEditionFor && pickingEditionFor.release_group_mbid && (
+        <ReleasePicker
+          albumTitle={pickingEditionFor.album}
+          releaseGroupMbid={pickingEditionFor.release_group_mbid}
+          onClose={() => setPickingEditionFor(null)}
+          onPick={(releaseMbid) => {
+            const album = pickingEditionFor;
+            setPickingEditionFor(null);
+            onAdd(album, releaseMbid);
+          }}
+        />
+      )}
     </div>
   );
 }

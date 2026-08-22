@@ -51,9 +51,24 @@ export interface WantedOut {
   artist: string;
   album: string | null;
   track: string | null;
+  release_mbid: string | null;
   status: WantedStatus;
   source: "manual" | "plex_gap";
   last_error: string | null;
+}
+
+export interface ReleaseEditionOut {
+  release_mbid: string;
+  title: string;
+  disambiguation: string | null;
+  date: string | null;
+  country: string | null;
+  track_count: number;
+  format: string | null;
+  label: string | null;
+  catalog_number: string | null;
+  barcode: string | null;
+  status: string | null;
 }
 
 export interface LibraryAlbumOut {
@@ -178,8 +193,10 @@ export const api = {
   listWanted: () => request<WantedOut[]>("/api/wanted"),
   getArtistDiscography: (artist: string) =>
     request<MissingAlbumOut[]>(`/api/wanted/discography?artist=${encodeURIComponent(artist)}`),
+  getReleaseEditions: (releaseGroupMbid: string) =>
+    request<ReleaseEditionOut[]>(`/api/wanted/release-editions?release_group_mbid=${encodeURIComponent(releaseGroupMbid)}`),
   coverArtUrl: (releaseGroupMbid: string) => `/api/wanted/cover-art/${encodeURIComponent(releaseGroupMbid)}`,
-  createWanted: (params: { artist: string; album?: string; track?: string }) =>
+  createWanted: (params: { artist: string; album?: string; track?: string; release_mbid?: string | null }) =>
     request<WantedOut>("/api/wanted", { method: "POST", body: JSON.stringify(params) }),
   deleteWanted: (id: number) => request<void>(`/api/wanted/${id}`, { method: "DELETE" }),
   scanWantedNow: (id: number) =>
@@ -197,7 +214,12 @@ export const api = {
     request<MissingAlbumOut[]>(`/api/plex/artist/${artistRatingKey}/missing-albums`),
   getTrackCheck: (albumRatingKey: string) =>
     request<TrackCheckOut>(`/api/plex/album/${albumRatingKey}/track-check`),
-  addMissingAlbumToWanted: (params: { artist: string; album: string; release_group_mbid?: string | null }) =>
+  addMissingAlbumToWanted: (params: {
+    artist: string;
+    album: string;
+    release_group_mbid?: string | null;
+    release_mbid?: string | null;
+  }) =>
     request<WantedOut>("/api/plex/missing-album/add-to-wanted", {
       method: "POST",
       body: JSON.stringify(params),

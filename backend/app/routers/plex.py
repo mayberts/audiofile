@@ -115,6 +115,7 @@ def add_missing_album_to_wanted(payload: AddMissingAlbumRequest, session: Sessio
         artist=payload.artist,
         album=payload.album,
         release_group_mbid=payload.release_group_mbid,
+        release_mbid=payload.release_mbid,
         source=WantedSource.PLEX_GAP,
     )
     session.add(wanted)

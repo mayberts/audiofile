@@ -149,6 +149,62 @@ class MusicBrainzClient:
         )
         return self._to_release_match(data)
 
+    def get_release_group_releases(self, release_group_mbid: str) -> list[dict]:
+        """Every specific release (edition/pressing) MusicBrainz has under one
+        release-group -- an album can easily have a dozen (different country
+        pressings, a plain CD vs. a deluxe reissue with bonus tracks), and
+        search_release()'s relevance-ranked guess at "the" release is never
+        going to suit everyone. Lets a caller show the real options and let
+        someone pick a specific one instead."""
+        data = self._get(
+            "/release",
+            {"release-group": release_group_mbid, "inc": "media+labels", "limit": 100},
+        )
+        releases = data.get("releases", [])
+        summaries = [self._to_release_summary(r) for r in releases]
+        # Bootlegs/promos sharing the release-group are rarely what someone
+        # means to pick, but only hidden when at least one official release
+        # actually exists -- an release-group with nothing but a bootleg
+        # listed is still better shown than shown empty.
+        official = [s for s in summaries if s["status"] == "Official"]
+        return official or summaries
+
+    def _to_release_summary(self, data: dict) -> dict:
+        media = data.get("media") or []
+        track_count = sum(m.get("track-count") or 0 for m in media)
+
+        format_counts: dict[str, int] = {}
+        for m in media:
+            fmt = m.get("format")
+            if fmt:
+                format_counts[fmt] = format_counts.get(fmt, 0) + 1
+        format_str = " + ".join(
+            f"{n}×{fmt}" if n > 1 else fmt for fmt, n in format_counts.items()
+        ) or None
+
+        release_events = data.get("release-events") or []
+        first_event_area = (release_events[0].get("area") or {}) if release_events else {}
+        country = data.get("country") or (first_event_area.get("iso-3166-1-codes") or [None])[0]
+        date = data.get("date") or (release_events[0].get("date") if release_events else None)
+
+        label_info = data.get("label-info") or []
+        label = ((label_info[0].get("label") or {}).get("name") if label_info else None)
+        catalog_number = label_info[0].get("catalog-number") if label_info else None
+
+        return {
+            "release_mbid": data["id"],
+            "title": data.get("title", ""),
+            "disambiguation": data.get("disambiguation") or None,
+            "date": date,
+            "country": country,
+            "track_count": track_count,
+            "format": format_str,
+            "label": label,
+            "catalog_number": catalog_number,
+            "barcode": data.get("barcode"),
+            "status": data.get("status"),
+        }
+
     def _to_release_match(self, data: dict) -> ReleaseMatch:
         artist_credit = data.get("artist-credit", [])
         artist_name = "".join(

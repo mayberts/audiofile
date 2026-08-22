@@ -223,6 +223,7 @@ def process_wanted_item(
             # fallback for when that guess doesn't match anything.
             hint_track=item.track if not is_batch else _extract_track_title(m.filename, item.artist, item.album),
             hint_track_number=_extract_track_number(m.filename, item.artist, item.album) if is_batch else None,
+            hint_release_mbid=item.release_mbid,
             status=DownloadStatus.QUEUED,
         )
         session.add(record)

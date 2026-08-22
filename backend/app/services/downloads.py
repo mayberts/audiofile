@@ -98,9 +98,17 @@ def resolve_track_metadata(
         # than one poll tick can resolve different tracks against
         # different editions (different dates), splitting one album
         # across two differently-named library folders.
-        cache_key = (record.hint_artist, record.hint_album)
+        # A hand-picked release (via the release-editions picker) always
+        # wins over a fresh guess -- keyed by its own mbid rather than the
+        # artist/album text pair so it can't collide with a cache entry an
+        # unpicked sibling item resolved by guessing.
+        cache_key = record.hint_release_mbid or (record.hint_artist, record.hint_album)
         if release_cache is not None and cache_key in release_cache:
             release = release_cache[cache_key]
+        elif record.hint_release_mbid:
+            release = mb.get_release(record.hint_release_mbid)
+            if release_cache is not None and release is not None:
+                release_cache[cache_key] = release
         else:
             release = mb.search_release(record.hint_artist, record.hint_album)
             if release:

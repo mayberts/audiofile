@@ -115,6 +115,20 @@ def upload_item_poster(
     return getattr(item, "thumb", None)
 
 
+def refresh_music_library(plex: PlexServer) -> None:
+    """Tells Plex to scan its music library section(s) for new files.
+
+    Organizing a download into the library folder only puts bytes on disk
+    -- Plex has no idea anything changed until its own scan runs, which
+    could be hours away (or never, if real-time change monitoring isn't
+    enabled). Without this, downloads pile up marked DONE in audiofile
+    while staying invisible in Plex until someone happens to trigger a
+    scan by hand."""
+    for section in plex.library.sections():
+        if section.type == "artist":
+            section.update()
+
+
 def get_album_tracks(plex: PlexServer, rating_key: str) -> list[dict]:
     album = plex.fetchItem(int(rating_key))
     tracks = []

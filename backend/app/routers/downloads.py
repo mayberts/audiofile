@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from ..clients.musicbrainz import MusicBrainzClient
+from ..clients.plex import PlexNotConfigured, get_plex_server, refresh_music_library
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import get_settings
 from ..database import get_session
 from ..models import DownloadRecord, DownloadStatus
 from ..schemas import DownloadOut
 from ..services import downloads as downloads_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 
@@ -54,6 +59,18 @@ def retry_download(download_id: int, session: Session = Depends(get_session)):
     finally:
         mb.close()
     session.refresh(record)
+
+    # Same as the scheduled poll: a file only just landed in the library
+    # folder doesn't make Plex aware of it by itself, and this retry path
+    # organizes independently of that poll tick.
+    if record.status == DownloadStatus.DONE:
+        try:
+            refresh_music_library(get_plex_server(settings))
+        except PlexNotConfigured:
+            pass
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to trigger Plex library refresh after retry")
+
     return record
 
 

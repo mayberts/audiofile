@@ -6,6 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlmodel import Session, select
 
 from .clients.musicbrainz import MusicBrainzClient
+from .clients.plex import PlexNotConfigured, get_plex_server, refresh_music_library
 from .clients.slskd import SlskdClient
 from .config import get_settings
 from .database import engine
@@ -38,10 +39,27 @@ def poll_downloads_job() -> None:
             completed = session.exec(
                 select(DownloadRecord).where(DownloadRecord.status == DownloadStatus.COMPLETED)
             ).all()
+            newly_organized = False
             for record in completed:
                 downloads_service.process_completed_download(session, record, settings, mb, _release_cache)
+                if record.status == DownloadStatus.DONE:
+                    newly_organized = True
 
             downloads_service.reconcile_stuck_wanted_items(session)
+
+        # Files landing in the library folder don't make Plex aware of them
+        # by themselves -- without this, everything in Downloads can show
+        # DONE while staying invisible in Plex until its own (possibly
+        # infrequent) scan gets to it. A Plex outage/misconfiguration here
+        # shouldn't fail the whole poll tick — downloads still need to keep
+        # processing even if Plex can't be reached right now.
+        if newly_organized:
+            try:
+                refresh_music_library(get_plex_server(settings))
+            except PlexNotConfigured:
+                pass
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to trigger Plex library refresh")
     except Exception:  # noqa: BLE001
         logger.exception("poll_downloads_job failed")
     finally:

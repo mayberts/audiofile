@@ -128,18 +128,44 @@ def process_wanted_item(
         if item.release_mbid:
             try:
                 pinned_release = mb.get_release(item.release_mbid)
-                if pinned_release and pinned_release.tracks:
-                    expected_titles = [t.get("title") or "" for t in pinned_release.tracks]
-            except Exception:  # noqa: BLE001
-                logger.warning(
+            except Exception:
+                # Loud on purpose: this exception being swallowed quietly is
+                # exactly what silently reverts to the old "grab everything"
+                # behavior with no visible sign anything went wrong -- if
+                # this is happening in practice, it needs to show up in the
+                # container logs, not disappear.
+                logger.exception(
                     "could not look up pinned release %s for wanted item %s; falling back to "
-                    "most-tracks-wins folder selection",
+                    "unfiltered folder selection",
                     item.release_mbid,
                     item.id,
+                )
+                pinned_release = None
+            if pinned_release and pinned_release.tracks:
+                expected_titles = [t.get("title") or "" for t in pinned_release.tracks]
+                logger.info(
+                    "wanted item %s: pinned release %s resolved with %d track title(s) to match against",
+                    item.id,
+                    item.release_mbid,
+                    len(expected_titles),
+                )
+            else:
+                logger.warning(
+                    "wanted item %s: pinned release %s resolved but had no tracks; falling back to "
+                    "unfiltered folder selection",
+                    item.id,
+                    item.release_mbid,
                 )
         folder = search_service.best_album_folder(
             results, settings, expected_titles=expected_titles, artist=item.artist, album=item.album
         )
+        if expected_titles:
+            logger.info(
+                "wanted item %s: title-filtered folder selection picked %d file(s) out of %d expected",
+                item.id,
+                len(folder) if folder else 0,
+                len(expected_titles),
+            )
         if folder:
             matches = folder
     if not matches:

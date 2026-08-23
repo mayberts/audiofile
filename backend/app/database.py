@@ -31,6 +31,12 @@ def _add_missing_columns() -> None:
         if "hint_release_mbid" not in existing:
             conn.exec_driver_sql("ALTER TABLE downloadrecord ADD COLUMN hint_release_mbid VARCHAR")
             conn.commit()
+        if "resolved_disc_number" not in existing:
+            conn.exec_driver_sql("ALTER TABLE downloadrecord ADD COLUMN resolved_disc_number INTEGER")
+            conn.commit()
+        if "resolved_track_number" not in existing:
+            conn.exec_driver_sql("ALTER TABLE downloadrecord ADD COLUMN resolved_track_number INTEGER")
+            conn.commit()
 
         existing_wanted = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(wanteditem)")}
         if "release_mbid" not in existing_wanted:

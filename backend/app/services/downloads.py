@@ -152,6 +152,15 @@ def resolve_track_metadata(
             fallback_title = record.hint_track or Path(remote_basename(record.slskd_filename)).stem
             title = matching_track["title"] if matching_track else fallback_title
             track_number = matching_track["position"] if matching_track else record.hint_track_number
+            # Only set when matching_track is a real hit against the
+            # release's own tracklist (title match, or a hint_track_number
+            # matched against the release's tracks) -- never from the
+            # unverified record.hint_track_number fallback above, which is
+            # just a filename-parsed guess. process_completed_download's
+            # position-based dedup check relies on disc_number being unset
+            # to mean "this position isn't confirmed, don't use it to
+            # judge duplicates."
+            disc_number = matching_track.get("disc") if matching_track else None
             return TrackMetadata(
                 artist=release.artist or record.hint_artist,
                 # The caller's own album hint wins over the resolved
@@ -168,6 +177,7 @@ def resolve_track_metadata(
                 album=record.hint_album or release.title,
                 title=title,
                 track_number=track_number,
+                disc_number=disc_number,
                 year=(release.date or "")[:4] or None,
                 release_mbid=release.release_mbid,
                 release_group_mbid=release.release_group_mbid,
@@ -209,22 +219,63 @@ def process_completed_download(
 
     try:
         meta = resolve_track_metadata(record, mb, release_cache)
-        cover_bytes = None
-        if meta.release_mbid:
-            cover_bytes = mb.get_cover_art(meta.release_mbid)
-        if cover_bytes is None and meta.release_group_mbid:
-            cover_bytes = mb.get_release_group_cover_art(meta.release_group_mbid)
 
-        tagging.tag_file(local_path, meta, cover_bytes)
+        # Position-based dedup safety net. Pre-download title filtering
+        # (best_album_folder / filter_files_matching_titles in the wanted
+        # service) already keeps most bundled alternate editions from ever
+        # being downloaded in the first place, but it only catches
+        # duplicates whose filename-derived titles actually match --  a
+        # clean/explicit pair, a second independent rip, or anything else
+        # whose filename text doesn't happen to line up still comes
+        # through as two separate DownloadRecords. Once each file is
+        # matched against the release's own canonical tracklist here
+        # (meta.disc_number/track_number, only ever set from a real
+        # tracklist hit -- see resolve_track_metadata), two records
+        # resolving to the exact same slot are unambiguously duplicates
+        # regardless of what their filenames looked like. First one to
+        # finish importing wins; the rest fail loudly with a clear reason
+        # instead of silently landing in the library renamed "_dup".
+        duplicate_of: DownloadRecord | None = None
+        if (
+            record.wanted_item_id is not None
+            and meta.disc_number is not None
+            and meta.track_number is not None
+        ):
+            duplicate_of = session.exec(
+                select(DownloadRecord).where(
+                    DownloadRecord.wanted_item_id == record.wanted_item_id,
+                    DownloadRecord.id != record.id,
+                    DownloadRecord.status == DownloadStatus.DONE,
+                    DownloadRecord.resolved_disc_number == meta.disc_number,
+                    DownloadRecord.resolved_track_number == meta.track_number,
+                )
+            ).first()
 
-        destination = organizer.library_path_for(settings.library_dir, meta, local_path)
-        final_path = organizer.move_into_library(local_path, destination)
+        if duplicate_of is not None:
+            record.status = DownloadStatus.FAILED
+            record.error = (
+                f"duplicate: disc {meta.disc_number} track {meta.track_number} "
+                f"already imported by download #{duplicate_of.id}"
+            )
+        else:
+            cover_bytes = None
+            if meta.release_mbid:
+                cover_bytes = mb.get_cover_art(meta.release_mbid)
+            if cover_bytes is None and meta.release_group_mbid:
+                cover_bytes = mb.get_release_group_cover_art(meta.release_group_mbid)
 
-        record.final_path = str(final_path)
-        record.mbid = meta.release_mbid
-        record.status = DownloadStatus.DONE
-        record.progress_percent = 100.0
-        record.error = None  # clear a stale error from an earlier failed attempt (e.g. a retry)
+            tagging.tag_file(local_path, meta, cover_bytes)
+
+            destination = organizer.library_path_for(settings.library_dir, meta, local_path)
+            final_path = organizer.move_into_library(local_path, destination)
+
+            record.final_path = str(final_path)
+            record.mbid = meta.release_mbid
+            record.resolved_disc_number = meta.disc_number
+            record.resolved_track_number = meta.track_number
+            record.status = DownloadStatus.DONE
+            record.progress_percent = 100.0
+            record.error = None  # clear a stale error from an earlier failed attempt (e.g. a retry)
     except Exception as exc:  # noqa: BLE001
         logger.exception("post-processing failed for download %s", record.id)
         record.status = DownloadStatus.FAILED

@@ -109,6 +109,15 @@ class DownloadRecord(SQLModel, table=True):
     # instead of re-guessing one from hint_artist/hint_album text.
     hint_release_mbid: Optional[str] = None
     mbid: Optional[str] = None
+    # The (disc, track) position this file actually resolved to against a
+    # release's own canonical tracklist -- set only once resolve_track_metadata
+    # found a real match, not from an unverified filename guess. Lets a later
+    # sibling download that resolves to the same slot be recognized as a
+    # duplicate at import time (see process_completed_download), regardless
+    # of whether its filename looked anything like the one that got there
+    # first.
+    resolved_disc_number: Optional[int] = None
+    resolved_track_number: Optional[int] = None
 
     status: DownloadStatus = Field(default=DownloadStatus.QUEUED)
     progress_percent: float = 0.0

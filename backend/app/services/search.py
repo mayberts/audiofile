@@ -173,6 +173,36 @@ def filter_files_matching_titles(
     return list(best_by_title.values())
 
 
+def dedupe_by_title(files: list[SearchFile], artist: str, album: str | None) -> list[SearchFile]:
+    """Collapses duplicate versions of the same track within a single
+    folder down to the best-scoring copy, keyed on the track title
+    extracted from each filename — at most one file per extracted title.
+
+    Runs unconditionally on every folder best_album_folder considers, not
+    just ones matched against a pinned release's tracklist: a peer's share
+    that bundles two rips of the same album, a clean/explicit pair, or a
+    bonus disc duplicating tracks from the main one still has only one
+    filename-derived title per real track, so this catches those
+    duplicates even when there's no MusicBrainz tracklist to compare
+    against. A file whose title can't be extracted at all is kept as-is
+    rather than risk merging unrelated files under a shared empty key."""
+    best_by_title: dict[str, SearchFile] = {}
+    order: list[str] = []
+    for f in files:
+        title = normalize_title(extract_track_title(f.filename, artist, album))
+        if not title:
+            key = f"__unkeyed_{len(order)}__"
+            order.append(key)
+            best_by_title[key] = f
+            continue
+        current = best_by_title.get(title)
+        if current is None:
+            order.append(title)
+        if current is None or f.score > current.score:
+            best_by_title[title] = f
+    return [best_by_title[key] for key in order]
+
+
 def best_album_folder(
     results: list[SearchFile],
     settings: Settings,
@@ -193,6 +223,15 @@ def best_album_folder(
     bonus/extended-mix tracks alongside the plain ones only ever contributes
     its matching tracks, not the whole bundle.
 
+    Every candidate folder — pinned release or not — is then run through
+    dedupe_by_title, keeping only the best-scoring file per extracted track
+    title. Without this, a folder mixing two versions of the same songs
+    (two rips, clean/explicit, a bonus disc) with no pinned release to
+    filter against would still get grabbed whole: nothing else here
+    compares titles within a folder, only counts and quality scores. This
+    also means folder ranking below sees each folder's real track count
+    (unique titles), not an inflated file count from bundled duplicates.
+
     Folders where every file meets the configured quality bar are
     considered first and exclusively — a flac-only setting means an mp3
     folder never gets picked over a flac one just for having a shorter
@@ -212,7 +251,8 @@ def best_album_folder(
         results = filter_files_matching_titles(results, artist, album, expected_titles)
 
     groups = group_by_folder(results)
-    all_candidates = [files for files in groups.values() if len(files) >= min_tracks]
+    deduped_groups = {key: dedupe_by_title(files, artist, album) for key, files in groups.items()}
+    all_candidates = [files for files in deduped_groups.values() if len(files) >= min_tracks]
     if not all_candidates:
         return None
 

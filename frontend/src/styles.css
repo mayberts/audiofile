@@ -212,6 +212,13 @@ tr:hover td {
   color: var(--danger);
 }
 
+/* Distinct from both in-progress (accent) and failed (danger) -- this
+   status means "needs your input", not "working" or "broken". */
+.badge.awaiting_review {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+
 .badge.in-library {
   background: rgba(148, 163, 184, 0.15);
   color: var(--muted);

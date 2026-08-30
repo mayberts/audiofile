@@ -78,6 +78,19 @@ class WantedOut(BaseModel):
         from_attributes = True
 
 
+class WantedReviewCandidateOut(BaseModel):
+    id: int
+    username: str
+    directory: str
+    file_count: int
+    total_size_bytes: int
+    score: float
+    tier: str
+
+    class Config:
+        from_attributes = True
+
+
 class ReleaseEditionOut(BaseModel):
     release_mbid: str
     title: str

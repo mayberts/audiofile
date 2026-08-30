@@ -44,7 +44,8 @@ export type WantedStatus =
   | "downloading"
   | "downloaded"
   | "not_found"
-  | "failed";
+  | "failed"
+  | "awaiting_review";
 
 export interface WantedOut {
   id: number;
@@ -55,6 +56,19 @@ export interface WantedOut {
   status: WantedStatus;
   source: "manual" | "plex_gap";
   last_error: string | null;
+}
+
+// One scored candidate folder pooled for a human to pick from when nothing
+// scored confidently enough for the backend to auto-pick (WantedStatus
+// "awaiting_review") -- see score_album_candidates in the backend.
+export interface WantedReviewCandidateOut {
+  id: number;
+  username: string;
+  directory: string;
+  file_count: number;
+  total_size_bytes: number;
+  score: number;
+  tier: "auto" | "manual" | "rejected";
 }
 
 export interface ReleaseEditionOut {
@@ -204,6 +218,12 @@ export const api = {
   scanWantedNow: (id: number) =>
     request<WantedOut>(`/api/wanted/${id}/scan-now`, { method: "POST" }),
   scanAllWanted: () => request<{ status: string }>("/api/wanted/scan-all", { method: "POST" }),
+  listWantedCandidates: (id: number) =>
+    request<WantedReviewCandidateOut[]>(`/api/wanted/${id}/candidates`),
+  pickWantedCandidate: (id: number, candidateId: number) =>
+    request<WantedOut>(`/api/wanted/${id}/candidates/${candidateId}/pick`, { method: "POST" }),
+  rejectWantedCandidates: (id: number) =>
+    request<WantedOut>(`/api/wanted/${id}/candidates/reject`, { method: "POST" }),
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
   scanLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library/scan", { method: "POST" }),

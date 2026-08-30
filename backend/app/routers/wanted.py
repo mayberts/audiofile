@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -11,10 +12,11 @@ from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.slskd import SlskdClient
 from ..config import get_settings
 from ..database import get_session
-from ..models import DownloadRecord, WantedItem, compute_wanted_dedup_key
-from ..schemas import MissingAlbumOut, ReleaseEditionOut, WantedCreate, WantedOut
+from ..models import DownloadRecord, WantedItem, WantedReviewCandidate, WantedStatus, compute_wanted_dedup_key
+from ..schemas import MissingAlbumOut, ReleaseEditionOut, WantedCreate, WantedOut, WantedReviewCandidateOut
+from ..schemas import SearchFile as SearchFileSchema
 from ..services.plex_gaps import get_artist_discography, get_owned_album_titles_from_snapshot
-from ..services.wanted import process_all_wanted, process_wanted_item
+from ..services.wanted import _enqueue_matches, process_all_wanted, process_wanted_item
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +202,12 @@ def delete_wanted(wanted_id: int, session: Session = Depends(get_session)):
     for record in records:
         session.delete(record)
 
+    candidates = session.exec(
+        select(WantedReviewCandidate).where(WantedReviewCandidate.wanted_item_id == wanted_id)
+    ).all()
+    for candidate in candidates:
+        session.delete(candidate)
+
     session.delete(item)
     session.commit()
 
@@ -218,6 +226,93 @@ def scan_now(wanted_id: int, session: Session = Depends(get_session)):
     finally:
         slskd.close()
         mb.close()
+    session.refresh(item)
+    return item
+
+
+@router.get("/{wanted_id}/candidates", response_model=list[WantedReviewCandidateOut])
+def list_candidates(wanted_id: int, session: Session = Depends(get_session)):
+    """Backs the manual-review picker shown when a wanted item is
+    AWAITING_REVIEW -- see score_album_candidates (services/search.py) and
+    _pool_review_candidates (services/wanted.py) for how these got here."""
+    item = session.get(WantedItem, wanted_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="wanted item not found")
+    return session.exec(
+        select(WantedReviewCandidate)
+        .where(WantedReviewCandidate.wanted_item_id == wanted_id)
+        .order_by(WantedReviewCandidate.score.desc())
+    ).all()
+
+
+@router.post("/{wanted_id}/candidates/{candidate_id}/pick", response_model=WantedOut)
+def pick_candidate(wanted_id: int, candidate_id: int, session: Session = Depends(get_session)):
+    item = session.get(WantedItem, wanted_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="wanted item not found")
+    candidate = session.get(WantedReviewCandidate, candidate_id)
+    if not candidate or candidate.wanted_item_id != wanted_id:
+        raise HTTPException(status_code=404, detail="review candidate not found")
+
+    files = json.loads(candidate.files_json)
+    # Rebuilt from what was persisted when this candidate was pooled --
+    # slots_free/upload_speed/queue_length/length_seconds/score aren't part
+    # of that record and don't matter here: _enqueue_matches only ever
+    # reads .username, .filename, and .size off each match.
+    matches = [
+        SearchFileSchema(
+            username=candidate.username,
+            filename=f["filename"],
+            size=f["size"],
+            bitrate=f.get("bitrate"),
+            extension=f.get("extension") or "",
+            slots_free=True,
+        )
+        for f in files
+    ]
+
+    settings = get_settings()
+    slskd = SlskdClient.from_settings(settings)
+    try:
+        _enqueue_matches(session, item, matches, slskd)
+    finally:
+        slskd.close()
+
+    # Whichever candidate was picked is now downloading -- the rest were
+    # only ever alternatives for this same decision, so clear the whole
+    # pool rather than leaving stale rows behind for a later listing to
+    # confuse with still-open options.
+    remaining = session.exec(
+        select(WantedReviewCandidate).where(WantedReviewCandidate.wanted_item_id == wanted_id)
+    ).all()
+    for c in remaining:
+        session.delete(c)
+    session.commit()
+
+    session.refresh(item)
+    return item
+
+
+@router.post("/{wanted_id}/candidates/reject", response_model=WantedOut)
+def reject_candidates(wanted_id: int, session: Session = Depends(get_session)):
+    item = session.get(WantedItem, wanted_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="wanted item not found")
+
+    candidates = session.exec(
+        select(WantedReviewCandidate).where(WantedReviewCandidate.wanted_item_id == wanted_id)
+    ).all()
+    for c in candidates:
+        session.delete(c)
+
+    # Back to not-found rather than deleted outright -- process_all_wanted
+    # retries NOT_FOUND items on every scan, so this is picked up again
+    # (and re-scored against fresh search results) without needing to be
+    # re-added from scratch.
+    item.status = WantedStatus.NOT_FOUND
+    item.last_error = None
+    session.add(item)
+    session.commit()
     session.refresh(item)
     return item
 

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, WantedOut } from "../api/client";
+import CandidatePicker from "../components/CandidatePicker";
 import DiscographyPicker from "../components/DiscographyPicker";
 
 export default function WantedPage() {
@@ -12,6 +13,7 @@ export default function WantedPage() {
   const [scanningAll, setScanningAll] = useState(false);
   const [pickingArtist, setPickingArtist] = useState<string | null>(null);
   const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
+  const [reviewingItem, setReviewingItem] = useState<WantedOut | null>(null);
 
   async function refresh() {
     try {
@@ -145,13 +147,19 @@ export default function WantedPage() {
                     <span className={`badge ${w.status}`}>{w.status.replace("_", " ")}</span>
                   </td>
                   <td className="row">
-                    <button
-                      className="secondary"
-                      onClick={() => onScanNow(w.id)}
-                      disabled={scanningIds.has(w.id) || w.status === "searching" || w.status === "downloading"}
-                    >
-                      {scanningIds.has(w.id) ? "Scanning..." : "Scan"}
-                    </button>
+                    {w.status === "awaiting_review" ? (
+                      <button className="secondary" onClick={() => setReviewingItem(w)}>
+                        Review candidates &rarr;
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary"
+                        onClick={() => onScanNow(w.id)}
+                        disabled={scanningIds.has(w.id) || w.status === "searching" || w.status === "downloading"}
+                      >
+                        {scanningIds.has(w.id) ? "Scanning..." : "Scan"}
+                      </button>
+                    )}
                     <button className="danger" onClick={() => onDelete(w.id)}>
                       Remove
                     </button>
@@ -173,6 +181,15 @@ export default function WantedPage() {
             setTrack("");
             refresh();
           }}
+        />
+      )}
+
+      {reviewingItem && (
+        <CandidatePicker
+          wantedId={reviewingItem.id}
+          label={`${reviewingItem.artist} — ${reviewingItem.album || reviewingItem.track || ""}`}
+          onClose={() => setReviewingItem(null)}
+          onResolved={refresh}
         />
       )}
     </div>

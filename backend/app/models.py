@@ -14,6 +14,10 @@ class WantedStatus(str, Enum):
     DOWNLOADED = "downloaded"
     NOT_FOUND = "not_found"
     FAILED = "failed"
+    # No candidate folder scored confidently enough to trust unattended (see
+    # score_album_candidates's "manual" tier) -- pooled candidates are
+    # sitting in WantedReviewCandidate waiting for a human pick instead.
+    AWAITING_REVIEW = "awaiting_review"
 
 
 class WantedSource(str, Enum):
@@ -60,6 +64,33 @@ class WantedItem(SQLModel, table=True):
     last_error: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WantedReviewCandidate(SQLModel, table=True):
+    """One scored candidate folder pooled for a human to pick from when a
+    wanted item's search comes back with nothing confident enough for
+    score_album_candidates to auto-pick (see services/wanted.py) -- exists
+    only while its WantedItem sits in AWAITING_REVIEW, and is cleared out
+    (all rows for that item) as soon as one gets picked or the whole batch
+    is rejected."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    wanted_item_id: int = Field(foreign_key="wanteditem.id")
+
+    username: str
+    directory: str
+    file_count: int
+    total_size_bytes: int
+    score: float
+    tier: str
+
+    # JSON-serialized [{filename, size, bitrate, extension}, ...] -- enough
+    # to rebuild the enqueue payload if this candidate gets picked, without
+    # re-running the search (peer results aren't persisted anywhere else,
+    # and re-searching could easily turn up a different folder entirely).
+    files_json: str
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class LibraryAlbum(SQLModel, table=True):

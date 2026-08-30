@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import PurePosixPath, PureWindowsPath
 
 from ..config import Settings
@@ -7,6 +10,11 @@ from ..schemas import SearchFile
 from .track_parsing import extract_track_title, normalize_title
 
 AUDIO_EXTENSIONS = {"flac", "mp3", "m4a", "aac", "ogg", "wav", "alac"}
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _words(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower()))
 
 
 def _extension_of(filename: str) -> str:
@@ -142,50 +150,23 @@ def group_by_folder(results: list[SearchFile]) -> dict[tuple[str, str], list[Sea
     return groups
 
 
-def filter_files_matching_titles(
-    files: list[SearchFile], artist: str, album: str | None, expected_titles: list[str]
-) -> list[SearchFile]:
-    """Keeps only the files whose extracted track title matches one of
-    `expected_titles` (a specific release's own tracklist, picked by hand
-    via the release-editions picker) -- at most one file per expected
-    title, the best-scoring one if several files claim the same title.
-
-    A single peer's shared folder can bundle more than one edition of the
-    same album together (a plain rip alongside a full set of "(extended
-    mix)" versions, say) -- picking "the biggest folder" or even "the
-    folder closest to the expected track count" still grabs the whole
-    bundle when that's the only (or largest) folder available, since
-    there's nothing smaller to prefer it over. Matching by title instead
-    finds exactly the tracks that are actually wanted regardless of what
-    else happens to be sitting alongside them in the same share."""
-    wanted = {normalize_title(t) for t in expected_titles if t}
-    if not wanted:
-        return files
-
-    best_by_title: dict[str, SearchFile] = {}
-    for f in files:
-        title = normalize_title(extract_track_title(f.filename, artist, album))
-        if title not in wanted:
-            continue
-        current = best_by_title.get(title)
-        if current is None or f.score > current.score:
-            best_by_title[title] = f
-    return list(best_by_title.values())
-
-
 def dedupe_by_title(files: list[SearchFile], artist: str, album: str | None) -> list[SearchFile]:
     """Collapses duplicate versions of the same track within a single
     folder down to the best-scoring copy, keyed on the track title
     extracted from each filename — at most one file per extracted title.
 
-    Runs unconditionally on every folder best_album_folder considers, not
-    just ones matched against a pinned release's tracklist: a peer's share
-    that bundles two rips of the same album, a clean/explicit pair, or a
-    bonus disc duplicating tracks from the main one still has only one
-    filename-derived title per real track, so this catches those
-    duplicates even when there's no MusicBrainz tracklist to compare
-    against. A file whose title can't be extracted at all is kept as-is
-    rather than risk merging unrelated files under a shared empty key."""
+    This is a scoring aid only (see score_album_candidates's count_ratio
+    and confidence terms) -- it must never again be used to decide which
+    files actually get downloaded. audiofile used to trim a folder down to
+    its deduped set before grabbing it; that made duplicate rejection only
+    as good as filename-title matching, which a clean/explicit pair or any
+    other differently-named duplicate slips right past. The whole folder
+    is downloaded unfiltered now, and real duplicate rejection happens at
+    import time instead, against MusicBrainz's own canonical tracklist
+    position (see process_completed_download in services/downloads.py),
+    which isn't fooled by filename drift the way title-string comparison
+    is. A file whose title can't be extracted at all is kept as-is rather
+    than risk merging unrelated files under a shared empty key."""
     best_by_title: dict[str, SearchFile] = {}
     order: list[str] = []
     for f in files:
@@ -203,66 +184,161 @@ def dedupe_by_title(files: list[SearchFile], artist: str, album: str | None) -> 
     return [best_by_title[key] for key in order]
 
 
-def best_album_folder(
+@dataclass
+class ScoredFolder:
+    username: str
+    directory: str
+    # The FULL, unfiltered contents of this (username, directory) share --
+    # score_album_candidates only ever ranks candidates, it never trims a
+    # folder's own file list. Whichever candidate the caller acts on gets
+    # downloaded exactly as found.
+    files: list[SearchFile]
+    score: float
+    tier: str  # "auto" | "manual" | "rejected"
+
+
+# score_album_candidates' tier gate. "auto" additionally requires artist
+# evidence in the folder path (see _has_artist_evidence) -- a coherent-
+# looking folder that happens to lack the artist's name anywhere in its
+# path is more likely a mislabeled share than the album actually wanted.
+_AUTO_TIER_THRESHOLD = 0.72
+_MANUAL_TIER_THRESHOLD = 0.35
+# Mirrors DroppedNeedle's own coherence/confidence split -- coherence
+# (does this folder look like a complete, well-formed copy of the album?)
+# is weighted higher than confidence (do the individual tracks' titles
+# actually match?) because confidence degrades to a neutral guess whenever
+# there's no MusicBrainz tracklist to compare against, while coherence's
+# quality/count signals are almost always available.
+_COHERENCE_WEIGHT = 0.625
+_CONFIDENCE_WEIGHT = 0.375
+
+
+def _has_artist_evidence(directory: str, artist: str) -> bool:
+    norm_artist = normalize_title(artist)
+    return bool(norm_artist) and norm_artist in normalize_title(directory)
+
+
+def _file_title_confidence(
+    f: SearchFile, artist: str, album: str | None, release_tracks: list[dict]
+) -> float:
+    """How well one file's filename-derived title matches the release's
+    own tracklist -- 1.0 for an exact (normalized) match, otherwise the
+    best fuzzy text ratio against any track title, with duration proximity
+    (SearchFile.length_seconds vs. a track's length_ms) as a secondary
+    signal for when the title text itself doesn't line up well (a
+    differently-named rip of the same recording, say)."""
+    title = normalize_title(extract_track_title(f.filename, artist, album))
+    if not title:
+        return 0.6
+
+    best = 0.0
+    for t in release_tracks:
+        track_title = normalize_title(t.get("title") or "")
+        if not track_title:
+            continue
+        if title == track_title:
+            return 1.0
+        best = max(best, SequenceMatcher(None, title, track_title).ratio())
+
+    if best < 0.6 and f.length_seconds:
+        for t in release_tracks:
+            length_ms = t.get("length_ms")
+            if not length_ms:
+                continue
+            diff = abs(f.length_seconds - length_ms / 1000)
+            if diff <= 3:
+                best = max(best, 0.85)
+            elif diff <= 8:
+                best = max(best, 0.6)
+    return best
+
+
+def score_album_candidates(
     results: list[SearchFile],
     settings: Settings,
+    artist: str,
+    album: str,
+    expected_track_count: int | None = None,
+    release_tracks: list[dict] | None = None,
     min_tracks: int = 2,
-    expected_titles: list[str] | None = None,
-    artist: str = "",
-    album: str | None = None,
-) -> list[SearchFile] | None:
-    """Picks the (username, folder) that looks most like a complete album
-    share in the preferred format/bitrate, rather than a single stray file
-    or a "good enough" folder in the wrong format.
+) -> list[ScoredFolder]:
+    """Scores every (username, directory) share that looks like it could be
+    this album -- a coherence + confidence blend modeled on DroppedNeedle's
+    AlbumPreflightScorer, gated into "auto" / "manual" / "rejected" tiers
+    instead of picking a single algorithmic winner outright.
 
-    When a specific release was pinned by hand (expected_titles set), every
-    candidate file is first narrowed down to just the ones matching one of
-    that release's own track titles — see filter_files_matching_titles for
-    why that's needed instead of just comparing folder sizes. Grouping and
-    ranking then run on that narrowed set, so a peer's folder that mixes in
-    bonus/extended-mix tracks alongside the plain ones only ever contributes
-    its matching tracks, not the whole bundle.
+    coherence asks "does this folder look like a complete, well-formed copy
+    of the album?" -- a blend of unique-track-count vs. expected_track_count
+    (via dedupe_by_title, so a folder padded with duplicate copies of the
+    same tracks doesn't score as more complete than it really is), how well
+    the folder name matches "{artist} {album}", and what fraction of its
+    files meet the configured format/bitrate bar.
 
-    Every candidate folder — pinned release or not — is then run through
-    dedupe_by_title, keeping only the best-scoring file per extracted track
-    title. Without this, a folder mixing two versions of the same songs
-    (two rips, clean/explicit, a bonus disc) with no pinned release to
-    filter against would still get grabbed whole: nothing else here
-    compares titles within a folder, only counts and quality scores. This
-    also means folder ranking below sees each folder's real track count
-    (unique titles), not an inflated file count from bundled duplicates.
+    confidence asks "do the individual tracks actually match this release?"
+    -- see _file_title_confidence. It's neutral (0.6, neither damning nor
+    vouching) when no release_tracks are available at all, since there's
+    nothing to compare titles against.
 
-    Folders where every file meets the configured quality bar are
-    considered first and exclusively — a flac-only setting means an mp3
-    folder never gets picked over a flac one just for having a shorter
-    queue, even though nothing here is comparing them file-by-file. Only
-    if no folder clears the bar at all does the full candidate set get
-    considered, so a real album is still preferred over nothing.
-
-    Within whichever pool is used: most tracks first (a complete album, or
-    a more complete match against a pinned release's tracklist, beats a
-    partial one), then — among folders tied on track count — the peer
-    least likely to leave the download stuck (free slot, short queue, fast
-    upload), then best average file-quality score as a final tiebreak.
-    Returns None if nothing has at least min_tracks files, so the caller
-    can fall back to a single-file best_match instead of forcing a "whole
-    folder" result out of scraps."""
-    if expected_titles:
-        results = filter_files_matching_titles(results, artist, album, expected_titles)
-
+    Every folder clearing min_tracks is returned, sorted by score
+    descending, including "rejected"-tier ones -- callers decide what to do
+    based on the top candidate's tier: "auto" proceeds automatically,
+    "manual" means nothing was confident enough to trust unattended and the
+    candidates should be pooled for a human to pick from, and "rejected" (or
+    an empty list) means fall back the way an empty best-effort search
+    always has -- a single-file best_match, then not-found."""
     groups = group_by_folder(results)
-    deduped_groups = {key: dedupe_by_title(files, artist, album) for key, files in groups.items()}
-    all_candidates = [files for files in deduped_groups.values() if len(files) >= min_tracks]
-    if not all_candidates:
-        return None
+    target_words = _words(f"{artist} {album}") if album else set()
 
-    qualifying = [files for files in all_candidates if all(_meets_quality_bar(f, settings) for f in files)]
-    pool = qualifying or all_candidates
+    candidates: list[ScoredFolder] = []
+    for (username, directory), files in groups.items():
+        if len(files) < min_tracks:
+            continue
 
-    def group_key(files: list[SearchFile]) -> tuple:
-        scores = [score_result(f, settings.preferred_format_list, settings.min_bitrate_kbps) for f in files]
-        avg_quality = sum(scores) / len(scores)
-        return (len(files), *_peer_priority(files[0]), avg_quality)
+        unique_tracks = dedupe_by_title(files, artist, album)
+        count_ratio = min(len(unique_tracks) / expected_track_count, 1.0) if expected_track_count else 0.7
 
-    pool.sort(key=group_key, reverse=True)
-    return pool[0]
+        # What fraction of the artist+album's own words show up somewhere in
+        # the folder path -- a word-overlap measure, not a raw character
+        # similarity ratio: normalize_title strips spaces entirely (it's
+        # built for comparing single track titles, where that's harmless),
+        # so running a whole folder PATH through it first and then fuzzy-
+        # matching the squashed result loses word-boundary information and
+        # gives misleadingly high scores to unrelated text that merely
+        # shares a lot of letters.
+        name_similarity = (
+            len(_words(directory) & target_words) / len(target_words) if target_words else 0.5
+        )
+
+        quality_consistency = sum(1 for f in files if _meets_quality_bar(f, settings)) / len(files)
+
+        coherence = (count_ratio + name_similarity + quality_consistency) / 3
+
+        if release_tracks:
+            confidences = [_file_title_confidence(f, artist, album, release_tracks) for f in unique_tracks]
+            confidence = sum(confidences) / len(confidences) if confidences else 0.6
+        else:
+            confidence = 0.6
+
+        score = round(_COHERENCE_WEIGHT * coherence + _CONFIDENCE_WEIGHT * confidence, 4)
+
+        # A folder whose path shares literally none of the artist+album's
+        # words is never worth showing, no matter how good its bitrate or
+        # file count happen to look -- those two signals alone can
+        # otherwise drag an entirely-wrong-artist folder's score up over
+        # the "manual" floor, which would mean showing someone an
+        # obviously-irrelevant option in their review queue.
+        no_name_relevance = bool(target_words) and not (_words(directory) & target_words)
+
+        if score >= _AUTO_TIER_THRESHOLD and _has_artist_evidence(directory, artist):
+            tier = "auto"
+        elif score >= _MANUAL_TIER_THRESHOLD and not no_name_relevance:
+            tier = "manual"
+        else:
+            tier = "rejected"
+
+        candidates.append(
+            ScoredFolder(username=username, directory=directory, files=files, score=score, tier=tier)
+        )
+
+    candidates.sort(key=lambda c: c.score, reverse=True)
+    return candidates

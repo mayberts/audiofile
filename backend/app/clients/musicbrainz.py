@@ -10,7 +10,6 @@ import httpx
 
 from ..config import Settings
 
-MB_BASE = "https://musicbrainz.org/ws/2"
 COVER_ART_BASE = "https://coverartarchive.org"
 
 # MusicBrainz's search API parses queries as Lucene syntax, so names
@@ -98,7 +97,7 @@ class MusicBrainzClient:
     def __init__(self, settings: Settings):
         user_agent = f"audiofile/0.1.0 ( {settings.musicbrainz_contact} )"
         self._client = httpx.Client(
-            base_url=MB_BASE,
+            base_url=settings.musicbrainz_base_url,
             headers={"User-Agent": user_agent, "Accept": "application/json"},
             timeout=15.0,
         )

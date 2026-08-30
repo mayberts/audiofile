@@ -146,6 +146,7 @@ export interface SettingsOut {
   plex_url: string;
   plex_token: string;
   musicbrainz_contact: string;
+  musicbrainz_base_url: string;
   download_dir: string;
   library_dir: string;
   wanted_scan_interval_minutes: number;

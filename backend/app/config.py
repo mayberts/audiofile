@@ -23,6 +23,11 @@ class Defaults(BaseSettings):
     plex_token: str = ""
 
     musicbrainz_contact: str = "audiofile@example.com"
+    # Points at the public API by default -- overridable for a self-hosted
+    # MusicBrainz mirror (e.g. https://mb.example.internal/ws/2). No
+    # trailing slash expected, matching how the public API's own path is
+    # written everywhere else in clients/musicbrainz.py.
+    musicbrainz_base_url: str = "https://musicbrainz.org/ws/2"
 
     download_dir: str = "/downloads"
     library_dir: str = "/music"
@@ -44,6 +49,7 @@ class Settings(BaseModel):
     plex_url: str
     plex_token: str
     musicbrainz_contact: str
+    musicbrainz_base_url: str
     download_dir: str
     library_dir: str
     database_url: str

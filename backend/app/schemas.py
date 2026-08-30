@@ -190,6 +190,7 @@ class SettingsUpdate(BaseModel):
     plex_url: Optional[str] = None
     plex_token: Optional[str] = None
     musicbrainz_contact: Optional[str] = None
+    musicbrainz_base_url: Optional[str] = None
     download_dir: Optional[str] = None
     library_dir: Optional[str] = None
     wanted_scan_interval_minutes: Optional[int] = None

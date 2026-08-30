@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
 import ArtworkPicker from "../components/ArtworkPicker";
-import ReleasePicker from "../components/ReleasePicker";
 import { libraryStore } from "../libraryStore";
 
 export default function ArtistDetailPage() {
@@ -124,19 +123,10 @@ export default function ArtistDetailPage() {
 
       {!loading && !error && (
         <>
-          <h2>Your Albums</h2>
-          {artistAlbums.length === 0 ? (
-            <div className="panel empty">No albums found for this artist.</div>
-          ) : (
-            <div className="artist-grid">
-              {artistAlbums.map((a) => (
-                <AlbumCard key={a.album} album={a} />
-              ))}
-            </div>
-          )}
-
-          <h2 style={{ marginTop: "1.5rem" }}>Missing Albums</h2>
-          {missingLoading && <div className="panel">Checking MusicBrainz...</div>}
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+            <h2 style={{ marginBottom: "0.3rem" }}>Albums</h2>
+            {missingLoading && <span className="muted">Checking MusicBrainz for anything missing...</span>}
+          </div>
           {missingError && (
             <div className="panel">
               <p className="error-text" style={{ margin: 0 }}>
@@ -151,11 +141,10 @@ export default function ArtistDetailPage() {
               </button>
             </div>
           )}
-          {!missingLoading && !missingError && missingAlbums && missingAlbums.length === 0 && (
-            <div className="panel empty">Nothing missing — you have every studio album MusicBrainz knows about.</div>
-          )}
-          {missingAlbums && missingAlbums.length > 0 && (
-            <MissingAlbumsTable artist={artistName} albums={missingAlbums} />
+          {artistAlbums.length === 0 && (missingAlbums?.length ?? 0) === 0 && !missingLoading ? (
+            <div className="panel empty">No albums found for this artist.</div>
+          ) : (
+            <ArtistAlbumList artist={artistName} ownedAlbums={artistAlbums} missingAlbums={missingAlbums ?? []} />
           )}
         </>
       )}
@@ -171,87 +160,182 @@ export default function ArtistDetailPage() {
   );
 }
 
-function MissingAlbumsTable({ artist, albums }: { artist: string; albums: MissingAlbumOut[] }) {
-  const [added, setAdded] = useState<Set<string>>(new Set());
-  const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pickingEditionFor, setPickingEditionFor] = useState<MissingAlbumOut | null>(null);
+// One combined, year-sorted list of everything MusicBrainz knows this
+// artist released -- owned albums (from the Plex-backed library snapshot)
+// and missing ones (checked live against MusicBrainz) interleaved in a
+// single view, each row showing a cover thumbnail and a right-side status
+// (a checkmark for owned, a download button for missing) instead of two
+// visually disconnected sections.
+type ArtistAlbumRowData =
+  | { kind: "owned"; key: string; title: string; year: number | null; owned: LibraryAlbumOut }
+  | { kind: "missing"; key: string; title: string; year: number | null; missing: MissingAlbumOut };
 
-  async function onAdd(album: MissingAlbumOut, releaseMbid?: string | null) {
-    setPending(album.album);
+function ArtistAlbumList({
+  artist,
+  ownedAlbums,
+  missingAlbums,
+}: {
+  artist: string;
+  ownedAlbums: LibraryAlbumOut[];
+  missingAlbums: MissingAlbumOut[];
+}) {
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [bulkAdding, setBulkAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const stillMissing = missingAlbums.filter((a) => !added.has(a.album));
+
+  async function addOne(album: MissingAlbumOut) {
+    setPending((prev) => new Set(prev).add(album.album));
     setError(null);
     try {
       await api.addMissingAlbumToWanted({
         artist,
         album: album.album,
         release_group_mbid: album.release_group_mbid,
-        release_mbid: releaseMbid,
       });
       setAdded((prev) => new Set(prev).add(album.album));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setPending(null);
+      setPending((prev) => {
+        const next = new Set(prev);
+        next.delete(album.album);
+        return next;
+      });
     }
   }
 
-  return (
-    <div className="panel">
-      {error && <div className="error-text" style={{ marginBottom: "0.6rem" }}>{error}</div>}
-      <table>
-        <thead>
-          <tr>
-            <th>Album</th>
-            <th>Released</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...albums]
-            .sort((a, b) => (a.first_release_date ?? "").localeCompare(b.first_release_date ?? ""))
-            .map((a) => (
-              <tr key={a.album}>
-                <td>{a.album}</td>
-                <td className="muted">{a.first_release_date || "—"}</td>
-                <td className="row" style={{ justifyContent: "flex-end" }}>
-                  {added.has(a.album) ? (
-                    <span className="badge downloaded">In wanted list</span>
-                  ) : (
-                    <>
-                      {a.release_group_mbid && (
-                        <button
-                          className="secondary"
-                          onClick={() => setPickingEditionFor(a)}
-                          disabled={pending === a.album}
-                        >
-                          Pick edition
-                        </button>
-                      )}
-                      <button className="secondary" onClick={() => onAdd(a)} disabled={pending === a.album}>
-                        {pending === a.album ? "..." : "Add to Wanted"}
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
+  async function addAll() {
+    setBulkAdding(true);
+    setError(null);
+    try {
+      await Promise.all(stillMissing.map((a) => addOne(a)));
+    } finally {
+      setBulkAdding(false);
+    }
+  }
 
-      {pickingEditionFor && pickingEditionFor.release_group_mbid && (
-        <ReleasePicker
-          albumTitle={pickingEditionFor.album}
-          releaseGroupMbid={pickingEditionFor.release_group_mbid}
-          onClose={() => setPickingEditionFor(null)}
-          onPick={(releaseMbid) => {
-            const album = pickingEditionFor;
-            setPickingEditionFor(null);
-            onAdd(album, releaseMbid);
-          }}
-        />
+  const rows: ArtistAlbumRowData[] = [
+    ...ownedAlbums.map(
+      (a): ArtistAlbumRowData => ({ kind: "owned", key: `owned:${a.album}`, title: a.album, year: a.year, owned: a }),
+    ),
+    ...stillMissing.map((a): ArtistAlbumRowData => {
+      const year = a.first_release_date ? parseInt(a.first_release_date.slice(0, 4), 10) : NaN;
+      return {
+        kind: "missing",
+        key: `missing:${a.album}`,
+        title: a.album,
+        year: Number.isNaN(year) ? null : year,
+        missing: a,
+      };
+    }),
+  ].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title));
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div className="row" style={{ justifyContent: "space-between", padding: "0.7rem 1rem" }}>
+        <span className="muted">
+          {rows.length} album{rows.length === 1 ? "" : "s"}
+        </span>
+        {stillMissing.length > 0 && (
+          <button className="secondary" onClick={addAll} disabled={bulkAdding}>
+            {bulkAdding ? "Adding..." : `Download All (${stillMissing.length})`}
+          </button>
+        )}
+      </div>
+      {error && (
+        <div className="error-text" style={{ padding: "0 1rem 0.6rem" }}>
+          {error}
+        </div>
+      )}
+      {rows.map((row) =>
+        row.kind === "owned" ? (
+          <ArtistAlbumRow key={row.key} row={row} />
+        ) : (
+          <ArtistAlbumRow
+            key={row.key}
+            row={row}
+            pending={pending.has(row.missing.album)}
+            onDownload={() => addOne(row.missing)}
+          />
+        ),
       )}
     </div>
   );
+}
+
+function ArtistAlbumRow({
+  row,
+  pending,
+  onDownload,
+}: {
+  row: ArtistAlbumRowData;
+  pending?: boolean;
+  onDownload?: () => void;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const coverUrl =
+    row.kind === "owned"
+      ? row.owned.thumb
+        ? api.plexImageUrl(row.owned.thumb)
+        : null
+      : row.missing.release_group_mbid
+        ? api.coverArtUrl(row.missing.release_group_mbid)
+        : null;
+
+  const inner = (
+    <div className="row" style={{ padding: "0.5rem 1rem", gap: "0.8rem", borderTop: "1px solid var(--border)" }}>
+      {coverUrl && !imgFailed ? (
+        <img
+          src={coverUrl}
+          alt=""
+          loading="lazy"
+          onError={() => setImgFailed(true)}
+          style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+        />
+      ) : (
+        <div className="artist-card-fallback" style={{ width: 40, height: 40, borderRadius: 6, fontSize: "1rem", flexShrink: 0 }}>
+          {row.title.charAt(0).toUpperCase()}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {row.title}
+        <div className="muted">{row.year ?? "—"}</div>
+      </div>
+      {row.kind === "owned" ? (
+        <span className="badge done" title="In your library" style={{ flexShrink: 0 }}>
+          &#10003;
+        </span>
+      ) : (
+        <button
+          className="secondary"
+          onClick={(e) => {
+            e.preventDefault();
+            onDownload?.();
+          }}
+          disabled={pending}
+          title="Add to wanted list"
+          style={{ flexShrink: 0 }}
+        >
+          {pending ? "..." : "⤓ Get"}
+        </button>
+      )}
+    </div>
+  );
+
+  if (row.kind === "owned") {
+    return (
+      <Link
+        to={`/library/${encodeURIComponent(row.owned.artist)}/${encodeURIComponent(row.owned.album)}`}
+        style={{ color: "inherit", textDecoration: "none", display: "block" }}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return inner;
 }
 
 const BIO_PREVIEW_LENGTH = 400;
@@ -273,31 +357,3 @@ function ArtistBio({ text }: { text: string }) {
   );
 }
 
-function AlbumCard({ album }: { album: LibraryAlbumOut }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const showImage = album.thumb && !imgFailed;
-
-  return (
-    <Link
-      className="artist-card"
-      to={`/library/${encodeURIComponent(album.artist)}/${encodeURIComponent(album.album)}`}
-    >
-      {showImage ? (
-        <img
-          src={api.plexImageUrl(album.thumb!)}
-          alt={album.album}
-          loading="lazy"
-          onError={() => setImgFailed(true)}
-        />
-      ) : (
-        <div className="artist-card-fallback">{album.album.charAt(0).toUpperCase()}</div>
-      )}
-      <div className="artist-card-label">
-        <div className="artist-card-name">{album.album}</div>
-        <div className="artist-card-meta">
-          {album.year ?? "—"} · {album.track_count ?? "—"} track{album.track_count === 1 ? "" : "s"}
-        </div>
-      </div>
-    </Link>
-  );
-}

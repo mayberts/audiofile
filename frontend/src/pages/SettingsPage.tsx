@@ -154,6 +154,20 @@ export default function SettingsPage() {
           />
         </div>
         <div className="field">
+          <label>MusicBrainz API base URL</label>
+          <input
+            type="url"
+            placeholder="https://musicbrainz.org/ws/2"
+            value={val("musicbrainz_base_url")}
+            onChange={(e) => field("musicbrainz_base_url", e.target.value)}
+          />
+          <span className="muted">
+            Point this at your own self-hosted MusicBrainz mirror instead of the public API — e.g.{" "}
+            <code>http://host.docker.internal:5000/ws/2</code>. Leave as the default to use
+            musicbrainz.org.
+          </span>
+        </div>
+        <div className="field">
           <label>Download directory (path inside this container)</label>
           <input
             type="text"

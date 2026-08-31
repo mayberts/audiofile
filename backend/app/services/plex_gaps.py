@@ -27,9 +27,16 @@ SKIP_SECONDARY_TYPES = {"Live", "Compilation", "Remix", "DJ-mix", "Mixtape/Stree
 # edition suffix ("Thriller (Special Edition)") for an album Plex just has
 # tagged as the plain title. Stripping both down before comparing avoids
 # flagging albums the user already owns as missing.
+#
+# "live" is included here too -- MusicBrainz routinely tags *every* track
+# on a live release with a redundant "(live)"/"(live at ...)" qualifier
+# ("Ambitionz az a Ridah (live)") that a Plex tag for the same file usually
+# omits (the whole album already being a live recording makes it
+# redundant), which otherwise fails every single track on the release to
+# match and reports the entire album missing.
 _EDITION_SUFFIX_RE = re.compile(
     r"[\(\[][^)\]]*\b(deluxe|remaster(ed)?|bonus(\s*tracks?)?|special\s*edition|"
-    r"anniversary|expanded|reissue|explicit|edition)\b[^)\]]*[\)\]]",
+    r"anniversary|expanded|reissue|explicit|edition|live)\b[^)\]]*[\)\]]",
     re.IGNORECASE,
 )
 # Hyphens/dashes act as word separators ("Self-Destruct" vs "Self Destruct"

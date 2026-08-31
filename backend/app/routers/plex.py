@@ -61,11 +61,29 @@ def scan_library(session: Session = Depends(get_session)):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not load Plex library: {exc}") from exc
 
+    # A rescan replaces every row wholesale -- Plex is the source of truth
+    # for everything else here, but a pinned release
+    # (LibraryAlbum.pinned_release_mbid/_title, set via "Compare against a
+    # different edition") has no Plex-side representation at all, it's
+    # purely local to audiofile. Carrying it forward by rating_key (stable
+    # across a rescan -- the same assumption _sync_library_thumb already
+    # relies on) is the only thing keeping a pin from silently disappearing
+    # the next time someone rescans their library.
+    pinned_by_rating_key = {
+        row.rating_key: (row.pinned_release_mbid, row.pinned_release_title)
+        for row in session.exec(select(LibraryAlbum)).all()
+        if row.rating_key and row.pinned_release_mbid
+    }
+
     for row in session.exec(select(LibraryAlbum)).all():
         session.delete(row)
     session.commit()
 
     rows = [LibraryAlbum(**album) for album in albums]
+    for row in rows:
+        pin = pinned_by_rating_key.get(row.rating_key)
+        if pin:
+            row.pinned_release_mbid, row.pinned_release_title = pin
     session.add_all(rows)
     session.commit()
     for row in rows:

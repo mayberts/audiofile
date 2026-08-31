@@ -46,6 +46,11 @@ _EDITION_SUFFIX_RE = re.compile(
 # collapse "Self-Destruct" into the single word "selfdestruct", which no
 # longer matches a Plex tag spelled with a plain space.
 _HYPHEN_RE = re.compile("[-‐‑‒–—―]")
+# "&" has to expand to the word it stands for, not just get dropped as
+# punctuation -- "Girls & Boys" vs a Plex tag spelled "Girls and Boys"
+# otherwise loses an entire word ("girls boys" vs "girls and boys"), which
+# is too big a gap for the fuzzy-match ratio in _title_owned to bridge.
+_AMPERSAND_RE = re.compile(r"\s*&\s*")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -53,6 +58,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 def _normalize_title(title: str) -> str:
     title = _EDITION_SUFFIX_RE.sub("", title)
     title = _HYPHEN_RE.sub(" ", title)
+    title = _AMPERSAND_RE.sub(" and ", title)
     title = _NON_WORD_RE.sub("", title)
     return _WHITESPACE_RE.sub(" ", title).strip().lower()
 

@@ -96,6 +96,16 @@ class TrackMetadata:
 # etc.) and its track count are both included right in the search response,
 # so the true album can be preferred over a same-titled single without an
 # extra lookup per candidate.
+#
+# Only the *primary* type is used for this -- secondary types (Live,
+# Compilation, Remix, ...) intentionally aren't disqualifying. An owned
+# album can itself be a live album or a compilation, in which case its own
+# correct release-group always carries one of those secondary types, so
+# requiring their absence made the *correct* match permanently rank below
+# literally any other same-titled hit that happened to have none (even a
+# single-track one) -- e.g. a live album would reliably match some
+# unrelated release instead of its own, comparing the library against a
+# completely different tracklist and reporting nearly everything missing.
 _PREFERRED_PRIMARY_TYPES = {"Album", "EP"}
 
 
@@ -106,10 +116,7 @@ def _release_track_count(release: dict) -> int:
 
 def _release_rank(release: dict) -> tuple[bool, int]:
     release_group = release.get("release-group") or {}
-    is_preferred_type = (
-        release_group.get("primary-type") in _PREFERRED_PRIMARY_TYPES
-        and not release_group.get("secondary-types")
-    )
+    is_preferred_type = release_group.get("primary-type") in _PREFERRED_PRIMARY_TYPES
     # Among same-type candidates, the fullest edition (e.g. a deluxe
     # reissue with bonus tracks) is the most useful one to compare a
     # library against -- it can only ever flag more of what's really

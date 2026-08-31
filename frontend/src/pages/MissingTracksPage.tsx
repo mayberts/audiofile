@@ -114,43 +114,48 @@ export default function MissingTracksPage() {
       )}
 
       {gaps.length > 0 && (
-        <div className="panel" style={{ padding: 0 }}>
-          {gaps.map((g) => (
-            <Link
-              key={g.rating_key}
-              to={`/library/${encodeURIComponent(g.artist)}/${encodeURIComponent(g.album)}`}
-              className="row"
-              style={{
-                padding: "0.5rem 1rem",
-                gap: "0.8rem",
-                borderTop: "1px solid var(--border)",
-                color: "inherit",
-                textDecoration: "none",
-              }}
-            >
-              {g.thumb ? (
-                <img
-                  src={api.plexImageUrl(g.thumb)}
-                  alt=""
-                  loading="lazy"
-                  style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
-                />
-              ) : (
-                <div className="artist-card-fallback" style={{ width: 40, height: 40, borderRadius: 6, fontSize: "1rem", flexShrink: 0 }}>
-                  {g.album.charAt(0).toUpperCase()}
+        <>
+          <p className="muted">
+            {gaps.length} album{gaps.length === 1 ? "" : "s"} with missing tracks.
+          </p>
+          <div className="panel" style={{ padding: 0 }}>
+            {gaps.map((g) => (
+              <Link
+                key={g.rating_key}
+                to={`/library/${encodeURIComponent(g.artist)}/${encodeURIComponent(g.album)}`}
+                className="row"
+                style={{
+                  padding: "0.5rem 1rem",
+                  gap: "0.8rem",
+                  borderTop: "1px solid var(--border)",
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                {g.thumb ? (
+                  <img
+                    src={api.plexImageUrl(g.thumb)}
+                    alt=""
+                    loading="lazy"
+                    style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+                  />
+                ) : (
+                  <div className="artist-card-fallback" style={{ width: 40, height: 40, borderRadius: 6, fontSize: "1rem", flexShrink: 0 }}>
+                    {g.album.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {g.album}
+                  <div className="muted">{g.artist}</div>
                 </div>
-              )}
-              <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {g.album}
-                <div className="muted">{g.artist}</div>
-              </div>
-              <span className="badge not_found" style={{ flexShrink: 0 }}>
-                Missing {g.missing_count}
-                {g.expected_total ? ` of ${g.expected_total}` : ""}
-              </span>
-            </Link>
-          ))}
-        </div>
+                <span className="badge not_found" style={{ flexShrink: 0 }}>
+                  Missing {g.missing_count}
+                  {g.expected_total ? ` of ${g.expected_total}` : ""}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import re
 from datetime import datetime
 
 from plexapi.server import PlexServer
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, select, update
 
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.plex import PlexNotConfigured, get_artist_album_titles, get_artist_item, get_plex_server
@@ -183,14 +184,20 @@ def run_track_gap_scan(scan_id: int) -> None:
     results page updates live instead of only once the whole thing (which
     can be thousands of albums) finishes.
 
+    Checks run in a bounded thread pool sized to
+    settings.musicbrainz_concurrent_requests -- MusicBrainzClient's own
+    module-level semaphore (clients/musicbrainz.py) enforces the same
+    limit against the actual HTTP requests regardless of how many workers
+    this pool has, but sizing the pool to match avoids piling up worker
+    threads that just sit blocked on that semaphore for no benefit. A
+    fresh Session per album (not one held for the whole run) both lets
+    concurrent workers commit independently and keeps every commit visible
+    to the progress-polling GET endpoint immediately rather than only once
+    the whole scan (possibly thousands of albums) finishes.
+
     Runs as a FastAPI BackgroundTasks target (see routers/track_gaps.py),
     so it owns its own settings/clients/sessions start to finish -- there's
-    no request-scoped anything to inherit. A fresh Session per album,
-    deliberately, rather than one held for the run's whole duration: with
-    thousands of albums this can run for a long time, and holding one
-    session/transaction open that whole time would both block other
-    writers and leave every commit invisible to the progress-polling GET
-    endpoint until the very end."""
+    no request-scoped anything to inherit."""
     from ..database import engine
 
     settings = get_settings()
@@ -217,16 +224,8 @@ def run_track_gap_scan(scan_id: int) -> None:
             session.add(scan)
             session.commit()
 
-        for rating_key, artist, album_title, thumb, pinned_release_mbid in album_snapshots:
-            with Session(engine) as session:
-                scan = session.get(TrackGapScan, scan_id)
-                if scan.cancel_requested:
-                    scan.status = TrackGapScanStatus.CANCELLED
-                    scan.finished_at = datetime.utcnow()
-                    session.add(scan)
-                    session.commit()
-                    return
-
+        def check_one(snapshot: tuple) -> None:
+            rating_key, artist, album_title, thumb, pinned_release_mbid = snapshot
             try:
                 result = get_missing_tracks_for_album(plex, mb, rating_key, pinned_release_mbid)
             except Exception:
@@ -243,53 +242,99 @@ def run_track_gap_scan(scan_id: int) -> None:
                     album_title,
                 )
                 result = None
+            _persist_gap_result(engine, scan_id, rating_key, artist, album_title, thumb, result)
 
-            with Session(engine) as session:
-                existing = session.exec(
-                    select(AlbumTrackGap).where(AlbumTrackGap.rating_key == rating_key)
-                ).first()
+        max_workers = max(1, settings.musicbrainz_concurrent_requests)
+        cancelled = False
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = []
+            for snapshot in album_snapshots:
+                if _scan_cancel_requested(engine, scan_id):
+                    cancelled = True
+                    break
+                futures.append(pool.submit(check_one, snapshot))
+            # Waits for whatever's already been submitted to finish before
+            # this function (and the "with" block closing the pool) returns
+            # -- there's no clean way to interrupt an in-flight
+            # ThreadPoolExecutor task, so a cancellation still lets up to
+            # max_workers already-started checks complete rather than
+            # abandoning them mid-request.
+            concurrent.futures.wait(futures)
 
-                if result and result["checked"] and result["missing_tracks"]:
-                    missing_titles = [t["title"] for t in result["missing_tracks"]]
-                    if existing:
-                        existing.artist = artist
-                        existing.album = album_title
-                        existing.thumb = thumb
-                        existing.expected_total = result["expected_total"]
-                        existing.owned_total = result["owned_total"]
-                        existing.missing_count = len(missing_titles)
-                        existing.missing_tracks_json = json.dumps(missing_titles)
-                        existing.release_title = result["release_title"]
-                        existing.checked_at = datetime.utcnow()
-                        session.add(existing)
-                    else:
-                        session.add(
-                            AlbumTrackGap(
-                                rating_key=rating_key,
-                                artist=artist,
-                                album=album_title,
-                                thumb=thumb,
-                                expected_total=result["expected_total"],
-                                owned_total=result["owned_total"],
-                                missing_count=len(missing_titles),
-                                missing_tracks_json=json.dumps(missing_titles),
-                                release_title=result["release_title"],
-                            )
-                        )
-                elif existing:
-                    # Complete now (or no longer resolvable on MusicBrainz)
-                    # -- either way it's not a gap anymore, don't leave a
-                    # stale row claiming it still is.
-                    session.delete(existing)
-
-                scan = session.get(TrackGapScan, scan_id)
-                scan.checked_albums += 1
-                session.add(scan)
-                session.commit()
-
-        _finish_scan(scan_id, TrackGapScanStatus.COMPLETED)
+        if cancelled or _scan_cancel_requested(engine, scan_id):
+            _finish_scan(scan_id, TrackGapScanStatus.CANCELLED)
+        else:
+            _finish_scan(scan_id, TrackGapScanStatus.COMPLETED)
     finally:
         mb.close()
+
+
+def _scan_cancel_requested(engine, scan_id: int) -> bool:
+    with Session(engine) as session:
+        scan = session.get(TrackGapScan, scan_id)
+        return bool(scan and scan.cancel_requested)
+
+
+def _persist_gap_result(
+    engine,
+    scan_id: int,
+    rating_key: str,
+    artist: str,
+    album_title: str,
+    thumb: str | None,
+    result: dict | None,
+) -> None:
+    """Upserts/deletes this one album's AlbumTrackGap row and atomically
+    bumps the scan's checked_albums counter. Safe to call from several
+    threads at once for *different* albums (each rating_key is unique
+    across the whole scan, so no two concurrent calls ever touch the same
+    AlbumTrackGap row) -- checked_albums itself uses a SQL-level
+    UPDATE ... SET checked_albums = checked_albums + 1 rather than a
+    read-modify-write, since that part *is* shared across every worker and
+    a plain "scan.checked_albums += 1; commit()" would lose updates under
+    real concurrency (two workers both reading the same starting value)."""
+    with Session(engine) as session:
+        existing = session.exec(select(AlbumTrackGap).where(AlbumTrackGap.rating_key == rating_key)).first()
+
+        if result and result["checked"] and result["missing_tracks"]:
+            missing_titles = [t["title"] for t in result["missing_tracks"]]
+            if existing:
+                existing.artist = artist
+                existing.album = album_title
+                existing.thumb = thumb
+                existing.expected_total = result["expected_total"]
+                existing.owned_total = result["owned_total"]
+                existing.missing_count = len(missing_titles)
+                existing.missing_tracks_json = json.dumps(missing_titles)
+                existing.release_title = result["release_title"]
+                existing.checked_at = datetime.utcnow()
+                session.add(existing)
+            else:
+                session.add(
+                    AlbumTrackGap(
+                        rating_key=rating_key,
+                        artist=artist,
+                        album=album_title,
+                        thumb=thumb,
+                        expected_total=result["expected_total"],
+                        owned_total=result["owned_total"],
+                        missing_count=len(missing_titles),
+                        missing_tracks_json=json.dumps(missing_titles),
+                        release_title=result["release_title"],
+                    )
+                )
+        elif existing:
+            # Complete now (or no longer resolvable on MusicBrainz) -- either
+            # way it's not a gap anymore, don't leave a stale row claiming it
+            # still is.
+            session.delete(existing)
+
+        session.exec(
+            update(TrackGapScan)
+            .where(TrackGapScan.id == scan_id)
+            .values(checked_albums=TrackGapScan.checked_albums + 1)
+        )
+        session.commit()
 
 
 def _finish_scan(scan_id: int, status: TrackGapScanStatus, last_error: str | None = None) -> None:

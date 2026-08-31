@@ -180,6 +180,8 @@ export interface SettingsOut {
   plex_token: string;
   musicbrainz_contact: string;
   musicbrainz_base_url: string;
+  musicbrainz_rate_limit_per_sec: number;
+  musicbrainz_concurrent_requests: number;
   download_dir: string;
   library_dir: string;
   wanted_scan_interval_minutes: number;

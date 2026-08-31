@@ -167,6 +167,34 @@ export default function SettingsPage() {
             musicbrainz.org.
           </span>
         </div>
+        <div className="row" style={{ gap: "1rem", alignItems: "flex-start" }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Rate Limit (requests/sec)</label>
+            <input
+              type="number"
+              min={0}
+              value={val("musicbrainz_rate_limit_per_sec")}
+              onChange={(e) => field("musicbrainz_rate_limit_per_sec", e.target.value)}
+            />
+            <span className="muted">
+              1 for the public API (its documented limit). Up to 500 on your own or a chosen server.
+              0 = unlimited (no client-side limiter). Be polite with servers you don't own.
+            </span>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Concurrent Requests</label>
+            <input
+              type="number"
+              min={1}
+              value={val("musicbrainz_concurrent_requests")}
+              onChange={(e) => field("musicbrainz_concurrent_requests", e.target.value)}
+            />
+            <span className="muted">
+              How many MusicBrainz lookups run at once — also sizes the missing-tracks scan's
+              worker pool. MusicBrainz's own official default is 6.
+            </span>
+          </div>
+        </div>
         <div className="field">
           <label>Download directory (path inside this container)</label>
           <input

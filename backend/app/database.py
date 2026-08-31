@@ -2,13 +2,31 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .config import get_settings
 
 _settings = get_settings()
-connect_args = {"check_same_thread": False} if _settings.database_url.startswith("sqlite") else {}
+_is_sqlite = _settings.database_url.startswith("sqlite")
+# timeout=30: the missing-tracks scan (services/plex_gaps.py) now runs
+# several albums' worth of DB commits concurrently from a thread pool --
+# without a busy timeout, SQLite raises "database is locked" immediately
+# on any write contention instead of briefly waiting for the other writer
+# to finish, which a handful of concurrent short-lived commits easily hits.
+connect_args = {"check_same_thread": False, "timeout": 30} if _is_sqlite else {}
 engine = create_engine(_settings.database_url, connect_args=connect_args)
+
+if _is_sqlite:
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_wal_mode(dbapi_connection, _connection_record) -> None:
+        # WAL lets readers (e.g. the scan-progress GET endpoint someone's
+        # polling in a browser tab) proceed without waiting on whichever
+        # thread currently holds the write lock -- default rollback-journal
+        # mode blocks readers on writers too, which matters a lot more now
+        # that a scan can have several threads committing concurrently.
+        dbapi_connection.execute("PRAGMA journal_mode=WAL")
 
 
 def init_db() -> None:

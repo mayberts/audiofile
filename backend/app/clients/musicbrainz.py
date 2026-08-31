@@ -8,7 +8,7 @@ from typing import Optional
 
 import httpx
 
-from ..config import Settings
+from ..config import Settings, get_settings
 
 COVER_ART_BASE = "https://coverartarchive.org"
 
@@ -22,19 +22,53 @@ _LUCENE_SPECIAL = re.compile(r'([+\-!(){}\[\]^"~*?:\\/&|])')
 def _escape_lucene(text: str) -> str:
     return _LUCENE_SPECIAL.sub(r"\\\1", text)
 
-# MusicBrainz asks for at most ~1 request/second from a given client.
+
+# Pacing (requests/sec) and concurrency (max in-flight requests) are both
+# process-wide, not per-MusicBrainzClient-instance -- every call site
+# (tagging one track, checking one album, a library-wide scan running many
+# checks in parallel) creates its own short-lived MusicBrainzClient, so a
+# per-instance limiter would let several instances each independently pace
+# themselves and blow straight through the real total request rate/
+# concurrency the configured server should see. Settings.
+# musicbrainz_rate_limit_per_sec/_concurrent_requests are read fresh on
+# every call (cheap -- local env + a small JSON file, no network) rather
+# than captured once, so a change on the Settings page takes effect
+# immediately, including on a scan already in progress.
 _last_request_lock = threading.Lock()
 _last_request_time = 0.0
-_MIN_INTERVAL_S = 1.05
+
+_concurrency_lock = threading.Lock()
+_concurrency_semaphore: threading.Semaphore | None = None
+_concurrency_semaphore_limit: int | None = None
 
 
 def _throttle() -> None:
     global _last_request_time
+    rate = get_settings().musicbrainz_rate_limit_per_sec
+    if rate <= 0:
+        return
+    min_interval = 1.0 / rate
     with _last_request_lock:
-        wait = _last_request_time + _MIN_INTERVAL_S - time.monotonic()
+        wait = _last_request_time + min_interval - time.monotonic()
         if wait > 0:
             time.sleep(wait)
         _last_request_time = time.monotonic()
+
+
+def _concurrency_slot() -> threading.Semaphore:
+    """Returns the current shared semaphore, rebuilding it if the
+    configured limit has changed since the last call. A caller that
+    acquires a specific semaphore object and later releases that same
+    object stays correct even if this rebuilds a new one for other callers
+    in between -- only the *count* of permits changes going forward, never
+    an in-flight caller's own acquire/release pairing."""
+    global _concurrency_semaphore, _concurrency_semaphore_limit
+    limit = max(1, get_settings().musicbrainz_concurrent_requests)
+    with _concurrency_lock:
+        if _concurrency_semaphore is None or _concurrency_semaphore_limit != limit:
+            _concurrency_semaphore = threading.Semaphore(limit)
+            _concurrency_semaphore_limit = limit
+        return _concurrency_semaphore
 
 
 @dataclass
@@ -101,13 +135,6 @@ class MusicBrainzClient:
             headers={"User-Agent": user_agent, "Accept": "application/json"},
             timeout=15.0,
         )
-        # The public API asks for ~1 req/sec; a self-hosted mirror has no
-        # such expectation, and blindly throttling it the same way would
-        # add hours to a full-library scan for no reason. Compared by host
-        # rather than exact URL string so a trailing-slash difference from
-        # the default doesn't accidentally disable throttling against the
-        # real public API.
-        self._rate_limit_mb = httpx.URL(settings.musicbrainz_base_url).host == "musicbrainz.org"
         self._cover_client = httpx.Client(
             base_url=COVER_ART_BASE,
             headers={"User-Agent": user_agent},
@@ -127,18 +154,28 @@ class MusicBrainzClient:
     def _get(self, path: str, params: dict) -> dict:
         params = {**params, "fmt": "json"}
         attempts = 3
-        for attempt in range(attempts):
-            if self._rate_limit_mb:
+        # Held for this whole logical fetch (including its own 503
+        # retries), not re-acquired per HTTP attempt -- "at most N of these
+        # in flight at once" is the actual guarantee wanted, and letting a
+        # retry sneak back in past a full semaphore would just mean more
+        # than N real requests reaching the server simultaneously.
+        slot = _concurrency_slot()
+        slot.acquire()
+        try:
+            for attempt in range(attempts):
                 _throttle()
-            resp = self._client.get(path, params=params)
-            # MusicBrainz's own guidance is that clients should back off and
-            # retry on 503 — it's load-shedding, not a real client error.
-            if resp.status_code == 503 and attempt < attempts - 1:
-                time.sleep(2.0 * (attempt + 1))
-                continue
-            resp.raise_for_status()
-            return resp.json()
-        raise AssertionError("unreachable")  # loop always returns or raises above
+                resp = self._client.get(path, params=params)
+                # MusicBrainz's own guidance is that clients should back off
+                # and retry on 503 — it's load-shedding, not a real client
+                # error.
+                if resp.status_code == 503 and attempt < attempts - 1:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            raise AssertionError("unreachable")  # loop always returns or raises above
+        finally:
+            slot.release()
 
     def search_release(self, artist: str, album: str) -> Optional[ReleaseMatch]:
         query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(album)}"'

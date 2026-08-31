@@ -28,6 +28,17 @@ class Defaults(BaseSettings):
     # trailing slash expected, matching how the public API's own path is
     # written everywhere else in clients/musicbrainz.py.
     musicbrainz_base_url: str = "https://musicbrainz.org/ws/2"
+    # The public API's own documented limit -- safe to raise a lot higher
+    # for a self-hosted mirror, which has no such constraint. 0 = no
+    # client-side pacing at all.
+    musicbrainz_rate_limit_per_sec: int = 1
+    # MusicBrainz's own "official default" for concurrent in-flight
+    # requests from one client, per their API guidance -- also doubles as
+    # the worker count for the library-wide missing-tracks scan
+    # (services/plex_gaps.py run_track_gap_scan), so raising this actually
+    # speeds up a full-library scan against a fast mirror, not just removes
+    # the artificial per-request delay.
+    musicbrainz_concurrent_requests: int = 6
 
     download_dir: str = "/downloads"
     library_dir: str = "/music"
@@ -50,6 +61,8 @@ class Settings(BaseModel):
     plex_token: str
     musicbrainz_contact: str
     musicbrainz_base_url: str
+    musicbrainz_rate_limit_per_sec: int
+    musicbrainz_concurrent_requests: int
     download_dir: str
     library_dir: str
     database_url: str

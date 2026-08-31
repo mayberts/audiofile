@@ -239,6 +239,8 @@ class SettingsUpdate(BaseModel):
     plex_token: Optional[str] = None
     musicbrainz_contact: Optional[str] = None
     musicbrainz_base_url: Optional[str] = None
+    musicbrainz_rate_limit_per_sec: Optional[int] = None
+    musicbrainz_concurrent_requests: Optional[int] = None
     download_dir: Optional[str] = None
     library_dir: Optional[str] = None
     wanted_scan_interval_minutes: Optional[int] = None

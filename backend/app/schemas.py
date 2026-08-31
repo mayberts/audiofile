@@ -134,6 +134,17 @@ class MissingAlbumOut(BaseModel):
     in_library: bool = False
 
 
+class TrackedArtistOut(BaseModel):
+    artist: str
+
+    class Config:
+        from_attributes = True
+
+
+class TrackArtistRequest(BaseModel):
+    artist: str
+
+
 class AddMissingAlbumRequest(BaseModel):
     artist: str
     album: str

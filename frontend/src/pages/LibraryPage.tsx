@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, LibraryAlbumOut } from "../api/client";
 import { libraryStore } from "../libraryStore";
 
@@ -9,20 +9,32 @@ interface ArtistSummary {
   albumCount: number;
   trackCount: number;
   albumTitles: string[];
+  // True when this artist has no owned albums at all -- added purely via
+  // "Add Artist" to browse their discography, not backed by anything in
+  // the Plex-derived library snapshot.
+  trackedOnly: boolean;
 }
 
-function summarizeByArtist(albums: LibraryAlbumOut[]): ArtistSummary[] {
+function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): ArtistSummary[] {
   const byArtist = new Map<string, ArtistSummary>();
   for (const a of albums) {
     let entry = byArtist.get(a.artist);
     if (!entry) {
-      entry = { artist: a.artist, thumb: a.artist_thumb, albumCount: 0, trackCount: 0, albumTitles: [] };
+      entry = { artist: a.artist, thumb: a.artist_thumb, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: false };
       byArtist.set(a.artist, entry);
     }
     entry.albumCount += 1;
     entry.trackCount += a.track_count ?? 0;
     entry.albumTitles.push(a.album);
     if (!entry.thumb && a.artist_thumb) entry.thumb = a.artist_thumb;
+  }
+  // A tracked artist who already owns something just shows up as a normal
+  // (non-tracked-only) card above -- tracking them again would be a no-op,
+  // so only artists with zero owned albums get the "tracked only" card.
+  for (const name of trackedNames) {
+    if (!byArtist.has(name)) {
+      byArtist.set(name, { artist: name, thumb: null, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: true });
+    }
   }
   return [...byArtist.values()].sort((x, y) => x.artist.localeCompare(y.artist));
 }
@@ -46,8 +58,9 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
       <div className="artist-card-label">
         <div className="artist-card-name">{artist.artist}</div>
         <div className="artist-card-meta">
-          {artist.albumCount} album{artist.albumCount === 1 ? "" : "s"} · {artist.trackCount} track
-          {artist.trackCount === 1 ? "" : "s"}
+          {artist.trackedOnly
+            ? "Not in library yet"
+            : `${artist.albumCount} album${artist.albumCount === 1 ? "" : "s"} · ${artist.trackCount} track${artist.trackCount === 1 ? "" : "s"}`}
         </div>
       </div>
     </Link>
@@ -56,9 +69,13 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
 
 export default function LibraryPage() {
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
+  const [trackedArtists, setTrackedArtists] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newArtist, setNewArtist] = useState("");
+  const [adding, setAdding] = useState(false);
+  const navigate = useNavigate();
 
   async function load() {
     setLoading(true);
@@ -72,6 +89,15 @@ export default function LibraryPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function loadTrackedArtists() {
+    api
+      .listTrackedArtists()
+      .then((rows) => setTrackedArtists(rows.map((r) => r.artist)))
+      .catch(() => {
+        // Non-critical -- the owned-album grid still works without this.
+      });
   }
 
   async function rescan() {
@@ -92,9 +118,30 @@ export default function LibraryPage() {
     if (libraryStore.albums === null) {
       load();
     }
+    loadTrackedArtists();
   }, []);
 
-  const artists = useMemo(() => summarizeByArtist(albums || []), [albums]);
+  async function onAddArtist(e: FormEvent) {
+    e.preventDefault();
+    const name = newArtist.trim();
+    if (!name || adding) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const tracked = await api.trackArtist(name);
+      setNewArtist("");
+      loadTrackedArtists();
+      // Go straight to their page -- browsing the discography is the whole
+      // point of adding them, no reason to make someone click the new card.
+      navigate(`/library/${encodeURIComponent(tracked.artist)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const artists = useMemo(() => summarizeByArtist(albums || [], trackedArtists), [albums, trackedArtists]);
   const totalTracks = useMemo(() => artists.reduce((sum, a) => sum + a.trackCount, 0), [artists]);
 
   const filtered = useMemo(() => {
@@ -121,6 +168,19 @@ export default function LibraryPage() {
         </button>
       </div>
 
+      <form className="panel row" onSubmit={onAddArtist}>
+        <input
+          type="text"
+          placeholder="Add an artist to browse (not in your library yet)..."
+          value={newArtist}
+          onChange={(e) => setNewArtist(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <button type="submit" className="secondary" disabled={adding || !newArtist.trim()}>
+          {adding ? "Adding..." : "+ Add Artist"}
+        </button>
+      </form>
+
       {error && <div className="panel error-text">{error}</div>}
 
       {albums && (
@@ -131,11 +191,10 @@ export default function LibraryPage() {
         </p>
       )}
 
-      {!albums && !loading && !error && <div className="panel empty">Nothing loaded yet.</div>}
-      {albums && filtered.length === 0 && (
+      {!loading && !error && filtered.length === 0 && (
         <div className="panel empty">
           {artists.length === 0
-            ? 'Nothing scanned yet — click "Scan Plex Library" above.'
+            ? 'Nothing here yet — click "Scan Plex Library" above, or add an artist to browse.'
             : "No artists match that filter."}
         </div>
       )}

@@ -117,6 +117,22 @@ class LibraryAlbum(SQLModel, table=True):
     pinned_release_title: Optional[str] = None
 
 
+class TrackedArtist(SQLModel, table=True):
+    """An artist added purely to browse -- shows up on the Library page and
+    gets a working artist page (full MusicBrainz discography) even though
+    nothing by them exists in the Plex-derived LibraryAlbum snapshot yet.
+    Deliberately has no connection to WantedItem/the download pipeline at
+    all: tracking an artist here never causes anything to search or
+    download -- that only ever happens when something is explicitly added
+    to the wanted list. Once real albums for this artist actually appear in
+    LibraryAlbum, this row just becomes redundant (the frontend prefers the
+    owned entry) rather than needing to be cleaned up."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    artist: str = Field(unique=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DownloadStatus(str, Enum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"

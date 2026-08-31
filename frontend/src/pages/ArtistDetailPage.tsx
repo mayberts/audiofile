@@ -64,14 +64,20 @@ export default function ArtistDetailPage() {
   useEffect(() => {
     setMissingAlbums(null);
     setMissingError(null);
-    if (!artistRatingKey) return;
+    if (!artistName) return;
     setMissingLoading(true);
+    // Deliberately the same name-based, Plex-independent lookup
+    // DiscographyPicker uses (checked against the local library snapshot,
+    // not a live Plex call) rather than the rating-key-based
+    // /missing-albums endpoint -- that one requires this artist to already
+    // have something owned in Plex, which an artist added purely to
+    // browse (see LibraryPage's "Add Artist") never will.
     api
-      .getMissingAlbums(artistRatingKey)
-      .then(setMissingAlbums)
+      .getArtistDiscography(artistName)
+      .then((discography) => setMissingAlbums(discography.filter((a) => !a.in_library)))
       .catch((err) => setMissingError(err instanceof Error ? err.message : String(err)))
       .finally(() => setMissingLoading(false));
-  }, [artistRatingKey, missingAttempt]);
+  }, [artistName, missingAttempt]);
 
   return (
     <div>

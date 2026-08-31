@@ -111,6 +111,12 @@ export interface MissingAlbumOut {
   in_library: boolean;
 }
 
+// An artist added purely to browse -- see the Library page's "Add Artist".
+// Tracking one never touches the wanted list or triggers any download.
+export interface TrackedArtistOut {
+  artist: string;
+}
+
 export interface MissingTrackOut {
   title: string;
   track_number: number | null;
@@ -230,6 +236,11 @@ export const api = {
 
   getLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library"),
   scanLibrary: () => request<LibraryAlbumOut[]>("/api/plex/library/scan", { method: "POST" }),
+  listTrackedArtists: () => request<TrackedArtistOut[]>("/api/artists"),
+  trackArtist: (artist: string) =>
+    request<TrackedArtistOut>("/api/artists", { method: "POST", body: JSON.stringify({ artist }) }),
+  untrackArtist: (artist: string) =>
+    request<void>(`/api/artists/${encodeURIComponent(artist)}`, { method: "DELETE" }),
   getAlbumTracks: (ratingKey: string) => request<TrackOut[]>(`/api/plex/album/${ratingKey}/tracks`),
   getArtistBio: (ratingKey: string) =>
     request<{ summary: string }>(`/api/plex/artist/${ratingKey}/bio`),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import difflib
 import json
 import logging
 import re
@@ -73,6 +74,69 @@ def _is_studio_album(rg: dict) -> bool:
     return not (secondary & SKIP_SECONDARY_TYPES)
 
 
+# Below this, exact-normalized-title matching stops covering real-world
+# variance that isn't a structural edition/live difference: MusicBrainz and
+# a Plex tag routinely just spell the same track differently -- "Optigan I"
+# vs "Optigan 1", "Pt. 1" vs "Part 1", "Lookin'" vs "Looking", "There's" vs
+# "There Is". A close-text similarity fallback catches these without
+# needing its own edit-stripping rule for every individual case.
+#
+# Deliberately NOT a substring-containment check ("is the shorter title
+# contained in the longer one") even though that would also catch a
+# shortened marketing title against MusicBrainz's fuller one -- a
+# genuinely different, unowned version of a track routinely *is* the plain
+# title plus an appended qualifier ("Hit 'Em Up" vs "Hit 'Em Up (single
+# version)", confirmed for real by this album's own scan results), which
+# containment can't tell apart from harmless wording drift. The ratio
+# check below already fails that case on its own (a whole extra qualifier
+# phrase pulls it well under the threshold), without needing a separate
+# rule that would also swallow real gaps like that one.
+_FUZZY_MATCH_MIN_RATIO = 0.87
+
+# A trailing part/chapter/movement number is exactly the part of a title
+# that must NOT be fuzzed over -- "Part 1" and "Part 2" (or "Optigan I" vs
+# "Optigan II") share almost every character, so the ratio/substring checks
+# below would otherwise happily call them the same track. Only trips when
+# *both* titles end in one of these (so "Optigan I" -- no number on the
+# Plex side -- still matches "Optigan 1" via the ratio check below).
+_TRAILING_ORDINAL_RE = re.compile(r"(?:^|\s)(\d+|[ivxlcdm]{1,4})$")
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def _roman_to_int(token: str) -> int | None:
+    total = 0
+    prev = 0
+    for ch in reversed(token):
+        value = _ROMAN_VALUES.get(ch)
+        if value is None:
+            return None
+        total += -value if value < prev else value
+        prev = max(prev, value)
+    return total or None
+
+
+def _trailing_ordinal_value(title_normalized: str) -> int | None:
+    match = _TRAILING_ORDINAL_RE.search(title_normalized)
+    if not match:
+        return None
+    token = match.group(1)
+    return int(token) if token.isdigit() else _roman_to_int(token)
+
+
+def _title_owned(title_normalized: str, owned_normalized: set[str]) -> bool:
+    if title_normalized in owned_normalized:
+        return True
+    ordinal = _trailing_ordinal_value(title_normalized)
+    for owned in owned_normalized:
+        if ordinal is not None:
+            owned_ordinal = _trailing_ordinal_value(owned)
+            if owned_ordinal is not None and owned_ordinal != ordinal:
+                continue
+        if difflib.SequenceMatcher(None, title_normalized, owned).ratio() >= _FUZZY_MATCH_MIN_RATIO:
+            return True
+    return False
+
+
 def _find_best_release(mb: MusicBrainzClient, artist: str, album: str, owned_normalized: set[str]):
     """Tries candidate editions of this album smallest-first (see
     MusicBrainzClient.search_release_candidates) and returns as soon as one
@@ -94,7 +158,7 @@ def _find_best_release(mb: MusicBrainzClient, artist: str, album: str, owned_nor
         if not full or not full.tracks:
             continue
         candidate_normalized = {_normalize_title(t.get("title") or "") for t in full.tracks}
-        matched = len(owned_normalized & candidate_normalized)
+        matched = sum(1 for owned in owned_normalized if _title_owned(owned, candidate_normalized))
         if owned_normalized and matched == len(owned_normalized):
             return full
         union = len(owned_normalized | candidate_normalized) or 1
@@ -142,7 +206,7 @@ def get_missing_tracks_for_album(
     missing = []
     for t in full_release.tracks:
         title = t.get("title") or ""
-        if _normalize_title(title) in owned_normalized:
+        if _title_owned(_normalize_title(title), owned_normalized):
             continue
         missing.append({"title": title, "track_number": t.get("position"), "disc": t.get("disc")})
 

@@ -61,7 +61,24 @@ def get_library_albums(plex: PlexServer) -> list[dict]:
                     "rating_key": str(album.ratingKey),
                 }
             )
-    return albums
+    return _dedupe_albums(albums)
+
+
+def _dedupe_albums(albums: list[dict]) -> list[dict]:
+    """Plex can list what's really one album more than once -- most often a
+    stray, incomplete duplicate folder on disk (a handful of leftover
+    tracks organized under a folder Plex still matches to the same album
+    metadata) sitting alongside the real one, sometimes overlapping library
+    sections. Either way it's one album to someone browsing Plex normally,
+    so it should be one row here too. Keeps whichever copy has the most
+    tracks per (artist, album, year) -- the complete one, not the stray."""
+    best_by_key: dict[tuple[str, str, Optional[int]], dict] = {}
+    for album in albums:
+        key = (album["artist"].strip().lower(), album["album"].strip().lower(), album["year"])
+        current = best_by_key.get(key)
+        if current is None or (album["track_count"] or 0) > (current["track_count"] or 0):
+            best_by_key[key] = album
+    return list(best_by_key.values())
 
 
 def get_artist_item(plex: PlexServer, rating_key: str):

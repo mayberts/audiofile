@@ -141,7 +141,22 @@ export default function AlbumDetailPage() {
       )}
 
       {albumEntry && tracks && tracks.length > 0 && (
-        <MissingTracksPanel artist={artistName} albumName={albumName} ratingKey={albumEntry.rating_key ?? ""} />
+        <MissingTracksPanel
+          // Forces a full remount on album navigation (ratingKey changes)
+          // instead of re-rendering the same instance with new props --
+          // without this, releaseOverride/result would carry over stale
+          // from whichever album was viewed previously, since react-router
+          // doesn't unmount this subtree just because :album changed.
+          key={albumEntry.rating_key ?? albumName}
+          artist={artistName}
+          albumName={albumName}
+          ratingKey={albumEntry.rating_key ?? ""}
+          pinnedRelease={
+            albumEntry.pinned_release_mbid
+              ? { mbid: albumEntry.pinned_release_mbid, title: albumEntry.pinned_release_title ?? "" }
+              : null
+          }
+        />
       )}
 
       {showArtworkPicker && albumEntry?.rating_key && (
@@ -159,19 +174,24 @@ function MissingTracksPanel({
   artist,
   albumName,
   ratingKey,
+  pinnedRelease,
 }: {
   artist: string;
   albumName: string;
   ratingKey: string;
+  pinnedRelease: { mbid: string; title: string } | null;
 }) {
   const [result, setResult] = useState<TrackCheckOut | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // null = auto (search_release()'s best guess); set once someone picks a
   // specific release via the search picker, e.g. a deluxe/bonus-disc
-  // reissue MusicBrainz lists under its own separate title.
-  const [releaseOverride, setReleaseOverride] = useState<{ mbid: string; title: string } | null>(null);
+  // reissue MusicBrainz lists under its own separate title. Initialized
+  // from the persisted pin (if any), so a previously-picked release is
+  // used again automatically instead of resetting to a guess every visit.
+  const [releaseOverride, setReleaseOverride] = useState<{ mbid: string; title: string } | null>(pinnedRelease);
   const [pickingRelease, setPickingRelease] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
 
   function check(mbid?: string | null) {
     setLoading(true);
@@ -183,15 +203,43 @@ function MissingTracksPanel({
       .finally(() => setLoading(false));
   }
 
-  function onPickRelease(release: ReleaseEditionOut) {
-    setPickingRelease(false);
-    setReleaseOverride({ mbid: release.release_mbid, title: release.title });
-    check(release.release_mbid);
+  // Reflects a pin/unpin into the cached library snapshot so other pages
+  // (the artist page's album list, revisiting this one) see it without
+  // needing a full "Scan Plex Library" — same pattern as onArtworkChanged
+  // above.
+  function syncPinnedInStore(pin: { mbid: string; title: string } | null) {
+    if (!libraryStore.albums) return;
+    libraryStore.albums = libraryStore.albums.map((a) =>
+      a.artist === artist && a.album === albumName
+        ? { ...a, pinned_release_mbid: pin?.mbid ?? null, pinned_release_title: pin?.title ?? null }
+        : a,
+    );
   }
 
-  function resetToAutomatic() {
+  async function onPickRelease(release: ReleaseEditionOut) {
+    setPickingRelease(false);
+    const pin = { mbid: release.release_mbid, title: release.title };
+    setReleaseOverride(pin);
+    check(pin.mbid);
+    setPinError(null);
+    try {
+      await api.pinAlbumRelease(ratingKey, pin.mbid, pin.title);
+      syncPinnedInStore(pin);
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function resetToAutomatic() {
     setReleaseOverride(null);
     check(null);
+    setPinError(null);
+    try {
+      await api.unpinAlbumRelease(ratingKey);
+      syncPinnedInStore(null);
+    } catch (err) {
+      setPinError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (
@@ -220,6 +268,7 @@ function MissingTracksPanel({
           <div className="row" style={{ justifyContent: "space-between", margin: "0.6rem 0" }}>
             <span className="muted">
               Comparing against: {result.release_title || "MusicBrainz's best match"}
+              {releaseOverride && " · pinned"}
             </span>
             <div className="row">
               <button className="secondary" onClick={() => setPickingRelease(true)}>
@@ -227,11 +276,12 @@ function MissingTracksPanel({
               </button>
               {releaseOverride && (
                 <button className="secondary" onClick={resetToAutomatic}>
-                  Reset to automatic match
+                  Unpin, use automatic match
                 </button>
               )}
             </div>
           </div>
+          {pinError && <div className="error-text" style={{ margin: "0 0 0.6rem" }}>{pinError}</div>}
           {result.missing_tracks.length === 0 && (
             <div className="panel empty">
               Nothing missing — all {result.expected_total} tracks MusicBrainz lists for this release are here.

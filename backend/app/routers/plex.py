@@ -26,6 +26,7 @@ from ..schemas import (
     AddMissingAlbumRequest,
     LibraryAlbumOut,
     MissingAlbumOut,
+    PinReleaseRequest,
     PosterOut,
     PosterResultOut,
     SelectPosterRequest,
@@ -175,6 +176,36 @@ def get_album_track_check(rating_key: str, release_mbid: str | None = None):
         raise HTTPException(status_code=502, detail=f"Could not check MusicBrainz: {exc}") from exc
     finally:
         mb.close()
+
+
+@router.post("/album/{rating_key}/release/pin", response_model=LibraryAlbumOut)
+def pin_album_release(rating_key: str, payload: PinReleaseRequest, session: Session = Depends(get_session)):
+    """Persists a release picked via "Compare against a different edition"
+    (AlbumDetailPage) so future visits to this album compare against it
+    automatically instead of falling back to search_release()'s guess and
+    needing the same release re-found and re-picked every time."""
+    row = session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="album not found in library snapshot")
+    row.pinned_release_mbid = payload.release_mbid
+    row.pinned_release_title = payload.release_title
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+@router.post("/album/{rating_key}/release/unpin", response_model=LibraryAlbumOut)
+def unpin_album_release(rating_key: str, session: Session = Depends(get_session)):
+    row = session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="album not found in library snapshot")
+    row.pinned_release_mbid = None
+    row.pinned_release_title = None
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
 
 
 @router.get("/item/{rating_key}/posters", response_model=list[PosterOut])

@@ -47,6 +47,14 @@ def _add_missing_columns() -> None:
             conn.commit()
             _backfill_wanted_dedup_keys(conn)
 
+        existing_library = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(libraryalbum)")}
+        if "pinned_release_mbid" not in existing_library:
+            conn.exec_driver_sql("ALTER TABLE libraryalbum ADD COLUMN pinned_release_mbid VARCHAR")
+            conn.commit()
+        if "pinned_release_title" not in existing_library:
+            conn.exec_driver_sql("ALTER TABLE libraryalbum ADD COLUMN pinned_release_title VARCHAR")
+            conn.commit()
+
     # A UNIQUE index (not just an index) is what actually makes create_wanted's
     # insert-first dedup race-proof -- a plain index wouldn't stop two
     # concurrent inserts from both succeeding. Created outside the block

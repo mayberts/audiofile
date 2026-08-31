@@ -107,6 +107,14 @@ class LibraryAlbum(SQLModel, table=True):
     year: Optional[int] = None
     track_count: Optional[int] = None
     rating_key: Optional[str] = None
+    # A specific release picked by hand via "Compare against a different
+    # edition" (the missing-tracks comparison on the album page) -- once
+    # set, that comparison always uses this exact release instead of
+    # re-guessing one from search_release() on every visit, so a
+    # deluxe/bonus-disc reissue picked once doesn't need to be re-found and
+    # re-picked again the next time this album's page is opened.
+    pinned_release_mbid: Optional[str] = None
+    pinned_release_title: Optional[str] = None
 
 
 class DownloadStatus(str, Enum):

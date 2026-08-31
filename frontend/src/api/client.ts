@@ -94,6 +94,8 @@ export interface LibraryAlbumOut {
   year: number | null;
   track_count: number | null;
   rating_key: string | null;
+  pinned_release_mbid: string | null;
+  pinned_release_title: string | null;
 }
 
 export interface TrackOut {
@@ -239,6 +241,13 @@ export const api = {
     request<TrackCheckOut>(
       `/api/plex/album/${albumRatingKey}/track-check${releaseMbid ? `?release_mbid=${encodeURIComponent(releaseMbid)}` : ""}`,
     ),
+  pinAlbumRelease: (albumRatingKey: string, releaseMbid: string, releaseTitle: string) =>
+    request<LibraryAlbumOut>(`/api/plex/album/${albumRatingKey}/release/pin`, {
+      method: "POST",
+      body: JSON.stringify({ release_mbid: releaseMbid, release_title: releaseTitle }),
+    }),
+  unpinAlbumRelease: (albumRatingKey: string) =>
+    request<LibraryAlbumOut>(`/api/plex/album/${albumRatingKey}/release/unpin`, { method: "POST" }),
   searchReleases: (artist: string, query: string) =>
     request<ReleaseEditionOut[]>(
       `/api/wanted/release-search?artist=${encodeURIComponent(artist)}&query=${encodeURIComponent(query)}`,

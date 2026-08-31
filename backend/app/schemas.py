@@ -114,6 +114,8 @@ class LibraryAlbumOut(BaseModel):
     year: Optional[int] = None
     track_count: Optional[int] = None
     rating_key: Optional[str] = None
+    pinned_release_mbid: Optional[str] = None
+    pinned_release_title: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -158,6 +160,11 @@ class SelectPosterRequest(BaseModel):
 
 class PosterResultOut(BaseModel):
     thumb: Optional[str] = None
+
+
+class PinReleaseRequest(BaseModel):
+    release_mbid: str
+    release_title: str
 
 
 class TrackCheckOut(BaseModel):

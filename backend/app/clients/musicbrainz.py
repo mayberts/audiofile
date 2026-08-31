@@ -84,6 +84,13 @@ class TrackMetadata:
     mbid: Optional[str] = None
     release_mbid: Optional[str] = None
     release_group_mbid: Optional[str] = None
+    # MusicBrainz's own disambiguation for the release/release-group, e.g.
+    # "Teal Album" or "Black Album" for Weezer's several self-titled
+    # releases. See organizer.library_path_for -- without this, two
+    # distinct albums that happen to share both a title and a release year
+    # (both true for those two Weezer records, both 2019) compute the exact
+    # same destination folder and get physically merged on disk.
+    album_disambiguation: Optional[str] = None
 
 
 # MusicBrainz's release search ranks purely by text relevance, with no
@@ -132,6 +139,7 @@ class ReleaseMatch:
     title: str
     date: Optional[str]
     tracks: list[dict] = field(default_factory=list)
+    disambiguation: Optional[str] = None
 
 
 class MusicBrainzClient:
@@ -325,6 +333,12 @@ class MusicBrainzClient:
             title=data.get("title", ""),
             date=data.get("date") or release_group.get("first-release-date"),
             tracks=tracks,
+            # The release-group's own disambiguation ("Teal Album") is
+            # preferred over the specific release's (often blank, or a
+            # pressing-level note like "US CD") -- it's the whole album's
+            # identity that needs distinguishing from a same-titled sibling,
+            # not this particular edition of it.
+            disambiguation=release_group.get("disambiguation") or data.get("disambiguation") or None,
         )
 
     def search_recording(self, artist: str, track: str) -> Optional[TrackMetadata]:

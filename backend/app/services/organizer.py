@@ -19,6 +19,14 @@ def library_path_for(library_dir: str, meta: TrackMetadata, source_path: Path) -
     album_name = sanitize(meta.album or "Unknown Album")
     if meta.year:
         album_name = f"{album_name} ({meta.year[:4]})"
+    if meta.album_disambiguation:
+        # Two distinct albums that share both a title and a release year
+        # (e.g. Weezer's "Teal Album" and "Black Album", both self-titled,
+        # both 2019) would otherwise compute the exact same destination
+        # folder and get physically merged together on disk -- the
+        # MusicBrainz disambiguation that exists precisely to distinguish
+        # them ("Teal Album" / "Black Album") keeps that from happening.
+        album_name = f"{album_name} [{sanitize(meta.album_disambiguation)}]"
 
     track_no = f"{meta.track_number:02d} - " if meta.track_number else ""
     filename = sanitize(f"{track_no}{meta.title or source_path.stem}") + source_path.suffix.lower()

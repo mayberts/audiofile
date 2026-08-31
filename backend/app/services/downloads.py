@@ -181,6 +181,7 @@ def resolve_track_metadata(
                 year=(release.date or "")[:4] or None,
                 release_mbid=release.release_mbid,
                 release_group_mbid=release.release_group_mbid,
+                album_disambiguation=release.disambiguation,
             )
 
     if record.hint_artist and record.hint_track:

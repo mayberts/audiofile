@@ -193,6 +193,34 @@ class MusicBrainzClient:
         best = max(releases, key=_release_rank)
         return self._to_release_match(best)
 
+    def search_release_candidates(self, artist: str, album: str, limit: int = 10) -> list[dict]:
+        """Raw release search hits for a track-by-track comparison caller
+        (see plex_gaps.get_missing_tracks_for_album) that needs to actually
+        try several editions rather than commit to search_release()'s
+        single relevance-ranked guess -- that guess prefers the fullest
+        (most tracks) edition among preferred types, which for someone who
+        owns a plain/standard pressing means comparing against a deluxe
+        reissue's bonus tracks they never had, and reporting them as
+        "missing" tracks that were never really missing.
+
+        Sorted smallest-track-count first: the caller fetches each
+        candidate's full tracklist in this order and stops at the first
+        one that already accounts for every track the library has, which
+        -- since it's the smallest such candidate -- is the edition least
+        likely to blame the library for tracks that belong to some bigger
+        reissue."""
+        query = f'artist:"{_escape_lucene(artist)}" AND release:"{_escape_lucene(album)}"'
+        data = self._get("/release", {"query": query, "limit": limit})
+        releases = data.get("releases", [])
+        if not releases:
+            return []
+        preferred = [
+            r for r in releases if (r.get("release-group") or {}).get("primary-type") in _PREFERRED_PRIMARY_TYPES
+        ]
+        candidates = preferred or releases
+        candidates.sort(key=_release_track_count)
+        return candidates
+
     def get_release(self, release_mbid: str) -> Optional[ReleaseMatch]:
         data = self._get(
             f"/release/{release_mbid}",

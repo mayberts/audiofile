@@ -73,6 +73,38 @@ def _is_studio_album(rg: dict) -> bool:
     return not (secondary & SKIP_SECONDARY_TYPES)
 
 
+def _find_best_release(mb: MusicBrainzClient, artist: str, album: str, owned_normalized: set[str]):
+    """Tries candidate editions of this album smallest-first (see
+    MusicBrainzClient.search_release_candidates) and returns as soon as one
+    fully accounts for every track already owned -- picking the biggest
+    edition by default (the old behavior) meant a plain/standard copy got
+    compared against a deluxe reissue's bonus tracks and had them reported
+    as "missing" even though they were never part of what was owned.
+
+    Falls back to whichever candidate best overlaps the library (by
+    Jaccard similarity of normalized track titles) if none fully accounts
+    for it -- there's a genuine gap either way at that point, so the
+    closest-matching edition is still the most useful one to diff
+    against."""
+    candidates = mb.search_release_candidates(artist, album)
+    best = None
+    best_score = -1.0
+    for candidate in candidates:
+        full = mb.get_release(candidate["id"])
+        if not full or not full.tracks:
+            continue
+        candidate_normalized = {_normalize_title(t.get("title") or "") for t in full.tracks}
+        matched = len(owned_normalized & candidate_normalized)
+        if owned_normalized and matched == len(owned_normalized):
+            return full
+        union = len(owned_normalized | candidate_normalized) or 1
+        score = matched / union
+        if score > best_score:
+            best_score = score
+            best = full
+    return best
+
+
 def get_missing_tracks_for_album(
     plex: PlexServer, mb: MusicBrainzClient, album_rating_key: str, release_mbid: str | None = None
 ) -> dict:
@@ -83,8 +115,8 @@ def get_missing_tracks_for_album(
 
     A caller can pin an exact release_mbid (picked via a release search --
     see search_releases()) to compare against instead of leaving it to
-    search_release()'s relevance-ranked guess. That's the only way to reach
-    a bonus-disc/deluxe reissue MusicBrainz models as its own separate
+    _find_best_release()'s guess. That's the only way to reach a
+    bonus-disc/deluxe reissue MusicBrainz models as its own separate
     release with a different title ("Album: Side B") rather than another
     edition of the same release-group -- guessing from this album's own
     title would never find it."""
@@ -102,12 +134,7 @@ def get_missing_tracks_for_album(
     if release_mbid:
         full_release = mb.get_release(release_mbid)
     else:
-        release = mb.search_release(album.parentTitle, album.title)
-        if not release:
-            return empty
-        # search_release only returns summary release info — no per-track
-        # listing — so the actual tracklist needs a follow-up lookup.
-        full_release = mb.get_release(release.release_mbid)
+        full_release = _find_best_release(mb, album.parentTitle, album.title, owned_normalized)
 
     if not full_release or not full_release.tracks:
         return empty

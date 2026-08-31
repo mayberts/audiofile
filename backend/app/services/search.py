@@ -253,6 +253,24 @@ def _file_title_confidence(
     return best
 
 
+# A track-level want (process_wanted_item's non-album branch) has no
+# folder-of-files coherence signal to lean on at all -- it's one Soulseek
+# text search for "{artist} {track}", and a substring search has no idea
+# that a hit titled "Song (TELYKAST Remix)" or "Song (Live)" is a
+# different recording than the plain "Song" that was actually wanted, only
+# that the words match. Reusing _file_title_confidence against the single
+# wanted title (rather than a whole release's tracklist) catches that: a
+# real recording of the right song scores close to 1.0 even through minor
+# filename/spelling drift, while an actual different version scores well
+# below this floor (confirmed against a real remix mismatch — 0.42 vs.
+# 1.0 for the plain track).
+TRACK_TITLE_CONFIDENCE_FLOOR = 0.7
+
+
+def title_confidence(f: SearchFile, artist: str, album: str | None, track: str) -> float:
+    return _file_title_confidence(f, artist, album, [{"title": track}])
+
+
 def score_album_candidates(
     results: list[SearchFile],
     settings: Settings,

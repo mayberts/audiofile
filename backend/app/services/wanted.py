@@ -244,12 +244,35 @@ def process_wanted_item(
             session.commit()
             return
         results = search_service.parse_search_responses(raw)
-        logger.info(
-            "wanted item %s: %d raw peer responses, %d audio-file results after parsing",
-            item.id,
-            len(raw),
-            len(results),
-        )
+        if item.track:
+            # A plain substring search for "{artist} {track}" has no idea
+            # that a hit titled "Song (TELYKAST Remix)" or "Song (Live)" is
+            # a different recording than the plain song actually wanted --
+            # only that the words match. Without this, best_match below
+            # picks purely on file quality (format/bitrate/peer speed),
+            # happily grabbing a great-quality copy of the wrong version.
+            before = len(results)
+            results = [
+                r
+                for r in results
+                if search_service.title_confidence(r, item.artist, item.album, item.track)
+                >= search_service.TRACK_TITLE_CONFIDENCE_FLOOR
+            ]
+            logger.info(
+                "wanted item %s: %d of %d results actually look like %r (not a remix/live/alternate "
+                "version) after title-confidence filtering",
+                item.id,
+                len(results),
+                before,
+                item.track,
+            )
+        else:
+            logger.info(
+                "wanted item %s: %d raw peer responses, %d audio-file results after parsing",
+                item.id,
+                len(raw),
+                len(results),
+            )
 
     if not matches:
         single = search_service.best_match(results, settings)

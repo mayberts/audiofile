@@ -16,12 +16,17 @@ interface ArtistSummary {
 }
 
 function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): ArtistSummary[] {
+  // Keyed case-insensitively -- someone can (and did) type "steps" into Add
+  // Artist while Plex/MusicBrainz's canonical casing is "Steps"; without
+  // normalizing, those show up as two unrelated cards instead of merging
+  // once the tracked artist's first album actually gets downloaded.
   const byArtist = new Map<string, ArtistSummary>();
   for (const a of albums) {
-    let entry = byArtist.get(a.artist);
+    const key = a.artist.toLowerCase();
+    let entry = byArtist.get(key);
     if (!entry) {
       entry = { artist: a.artist, thumb: a.artist_thumb, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: false };
-      byArtist.set(a.artist, entry);
+      byArtist.set(key, entry);
     }
     entry.albumCount += 1;
     entry.trackCount += a.track_count ?? 0;
@@ -29,11 +34,13 @@ function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): A
     if (!entry.thumb && a.artist_thumb) entry.thumb = a.artist_thumb;
   }
   // A tracked artist who already owns something just shows up as a normal
-  // (non-tracked-only) card above -- tracking them again would be a no-op,
-  // so only artists with zero owned albums get the "tracked only" card.
+  // (non-tracked-only) card above, under the owned entry's (canonical)
+  // casing -- tracking them again would be a no-op, so only artists with
+  // zero owned albums get the "tracked only" card.
   for (const name of trackedNames) {
-    if (!byArtist.has(name)) {
-      byArtist.set(name, { artist: name, thumb: null, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: true });
+    const key = name.toLowerCase();
+    if (!byArtist.has(key)) {
+      byArtist.set(key, { artist: name, thumb: null, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: true });
     }
   }
   return [...byArtist.values()].sort((x, y) => x.artist.localeCompare(y.artist));

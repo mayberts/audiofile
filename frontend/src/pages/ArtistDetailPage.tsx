@@ -25,10 +25,15 @@ export default function ArtistDetailPage() {
     }
   }, []);
 
+  // Case-insensitive on purpose: the URL's :artist param can come from a
+  // tracked-only entry typed by hand ("steps") while Plex/MusicBrainz's own
+  // casing is "Steps" -- an exact match would never find this artist's
+  // owned albums once one actually gets downloaded and organized.
   const artistAlbums = useMemo(() => {
     if (!albums) return [];
+    const target = artistName.toLowerCase();
     return albums
-      .filter((a) => a.artist === artistName)
+      .filter((a) => a.artist.toLowerCase() === target)
       .sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || a.album.localeCompare(b.album));
   }, [albums, artistName]);
 
@@ -41,8 +46,9 @@ export default function ArtistDetailPage() {
   function onArtworkChanged(thumb: string | null) {
     setArtistThumbOverride(thumb);
     if (libraryStore.albums) {
+      const target = artistName.toLowerCase();
       libraryStore.albums = libraryStore.albums.map((a) =>
-        a.artist === artistName ? { ...a, artist_thumb: thumb } : a,
+        a.artist.toLowerCase() === target ? { ...a, artist_thumb: thumb } : a,
       );
     }
   }

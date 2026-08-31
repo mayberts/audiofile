@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
+from datetime import datetime
 
 from plexapi.server import PlexServer
 from sqlmodel import Session, func, select
 
 from ..clients.musicbrainz import MusicBrainzClient
-from ..clients.plex import get_artist_album_titles, get_artist_item
-from ..models import LibraryAlbum
+from ..clients.plex import PlexNotConfigured, get_artist_album_titles, get_artist_item, get_plex_server
+from ..config import get_settings
+from ..models import AlbumTrackGap, LibraryAlbum, TrackGapScan, TrackGapScanStatus
+
+logger = logging.getLogger(__name__)
 
 # Secondary/live/compilation-style release groups are rarely what someone
 # means by "albums I don't have", so keep the default check to primary
@@ -167,3 +173,134 @@ def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artis
     owned_normalized = {_normalize_title(t) for t in get_artist_album_titles(artist)}
     discography = get_artist_discography(mb, artist.title, owned_normalized)
     return [a for a in discography if not a["in_library"]]
+
+
+def run_track_gap_scan(scan_id: int) -> None:
+    """Runs get_missing_tracks_for_album across every album in the
+    persisted Plex snapshot (LibraryAlbum -- the same source of truth the
+    rest of the app treats as "what's in your library", not a fresh live
+    Plex walk), upserting/deleting AlbumTrackGap rows as it goes so the
+    results page updates live instead of only once the whole thing (which
+    can be thousands of albums) finishes.
+
+    Runs as a FastAPI BackgroundTasks target (see routers/track_gaps.py),
+    so it owns its own settings/clients/sessions start to finish -- there's
+    no request-scoped anything to inherit. A fresh Session per album,
+    deliberately, rather than one held for the run's whole duration: with
+    thousands of albums this can run for a long time, and holding one
+    session/transaction open that whole time would both block other
+    writers and leave every commit invisible to the progress-polling GET
+    endpoint until the very end."""
+    from ..database import engine
+
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        try:
+            plex = get_plex_server(settings)
+        except PlexNotConfigured as exc:
+            _finish_scan(scan_id, TrackGapScanStatus.FAILED, last_error=str(exc))
+            return
+
+        with Session(engine) as session:
+            albums = session.exec(select(LibraryAlbum)).all()
+            # Plain tuples, not the ORM rows themselves -- session.commit()
+            # below expires every attribute on them, and this loop runs for
+            # a long time across many more sessions after this one closes,
+            # so touching an attribute on the ORM instance later raises
+            # DetachedInstanceError instead of silently refetching.
+            album_snapshots = [
+                (a.rating_key, a.artist, a.album, a.thumb, a.pinned_release_mbid) for a in albums
+            ]
+            scan = session.get(TrackGapScan, scan_id)
+            scan.total_albums = len(album_snapshots)
+            session.add(scan)
+            session.commit()
+
+        for rating_key, artist, album_title, thumb, pinned_release_mbid in album_snapshots:
+            with Session(engine) as session:
+                scan = session.get(TrackGapScan, scan_id)
+                if scan.cancel_requested:
+                    scan.status = TrackGapScanStatus.CANCELLED
+                    scan.finished_at = datetime.utcnow()
+                    session.add(scan)
+                    session.commit()
+                    return
+
+            try:
+                result = get_missing_tracks_for_album(plex, mb, rating_key, pinned_release_mbid)
+            except Exception:
+                # One bad album (a stale rating_key, a transient MB error
+                # that exhausted its own retries) shouldn't abort a scan
+                # that might be hours into thousands of albums -- log it,
+                # leave whatever AlbumTrackGap row already existed for it
+                # alone, and move on.
+                logger.exception(
+                    "track gap scan %s: failed checking album %s (%s - %s)",
+                    scan_id,
+                    rating_key,
+                    artist,
+                    album_title,
+                )
+                result = None
+
+            with Session(engine) as session:
+                existing = session.exec(
+                    select(AlbumTrackGap).where(AlbumTrackGap.rating_key == rating_key)
+                ).first()
+
+                if result and result["checked"] and result["missing_tracks"]:
+                    missing_titles = [t["title"] for t in result["missing_tracks"]]
+                    if existing:
+                        existing.artist = artist
+                        existing.album = album_title
+                        existing.thumb = thumb
+                        existing.expected_total = result["expected_total"]
+                        existing.owned_total = result["owned_total"]
+                        existing.missing_count = len(missing_titles)
+                        existing.missing_tracks_json = json.dumps(missing_titles)
+                        existing.release_title = result["release_title"]
+                        existing.checked_at = datetime.utcnow()
+                        session.add(existing)
+                    else:
+                        session.add(
+                            AlbumTrackGap(
+                                rating_key=rating_key,
+                                artist=artist,
+                                album=album_title,
+                                thumb=thumb,
+                                expected_total=result["expected_total"],
+                                owned_total=result["owned_total"],
+                                missing_count=len(missing_titles),
+                                missing_tracks_json=json.dumps(missing_titles),
+                                release_title=result["release_title"],
+                            )
+                        )
+                elif existing:
+                    # Complete now (or no longer resolvable on MusicBrainz)
+                    # -- either way it's not a gap anymore, don't leave a
+                    # stale row claiming it still is.
+                    session.delete(existing)
+
+                scan = session.get(TrackGapScan, scan_id)
+                scan.checked_albums += 1
+                session.add(scan)
+                session.commit()
+
+        _finish_scan(scan_id, TrackGapScanStatus.COMPLETED)
+    finally:
+        mb.close()
+
+
+def _finish_scan(scan_id: int, status: TrackGapScanStatus, last_error: str | None = None) -> None:
+    from ..database import engine
+
+    with Session(engine) as session:
+        scan = session.get(TrackGapScan, scan_id)
+        if scan is None:
+            return
+        scan.status = status
+        scan.last_error = last_error
+        scan.finished_at = datetime.utcnow()
+        session.add(scan)
+        session.commit()

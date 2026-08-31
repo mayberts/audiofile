@@ -101,6 +101,13 @@ class MusicBrainzClient:
             headers={"User-Agent": user_agent, "Accept": "application/json"},
             timeout=15.0,
         )
+        # The public API asks for ~1 req/sec; a self-hosted mirror has no
+        # such expectation, and blindly throttling it the same way would
+        # add hours to a full-library scan for no reason. Compared by host
+        # rather than exact URL string so a trailing-slash difference from
+        # the default doesn't accidentally disable throttling against the
+        # real public API.
+        self._rate_limit_mb = httpx.URL(settings.musicbrainz_base_url).host == "musicbrainz.org"
         self._cover_client = httpx.Client(
             base_url=COVER_ART_BASE,
             headers={"User-Agent": user_agent},
@@ -121,7 +128,8 @@ class MusicBrainzClient:
         params = {**params, "fmt": "json"}
         attempts = 3
         for attempt in range(attempts):
-            _throttle()
+            if self._rate_limit_mb:
+                _throttle()
             resp = self._client.get(path, params=params)
             # MusicBrainz's own guidance is that clients should back off and
             # retry on 503 — it's load-shedding, not a real client error.

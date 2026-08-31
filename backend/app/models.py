@@ -133,6 +133,53 @@ class TrackedArtist(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class TrackGapScanStatus(str, Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class TrackGapScan(SQLModel, table=True):
+    """One run of the full-library missing-tracks scan (services/plex_gaps.py
+    run_track_gap_scan). The most recent row (by started_at) is "the"
+    current/last scan a client polls -- kept as a normal multi-row table
+    (cheap built-in history) rather than trying to enforce a true
+    singleton."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: TrackGapScanStatus = Field(default=TrackGapScanStatus.RUNNING)
+    total_albums: int = 0
+    checked_albums: int = 0
+    # Cooperative cancellation -- the scan loop checks this once per album
+    # rather than being killed outright, so it never leaves a half-written
+    # AlbumTrackGap row or an inconsistent checked_albums count behind.
+    cancel_requested: bool = False
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class AlbumTrackGap(SQLModel, table=True):
+    """One row per album the most recent scan found missing tracks for --
+    only albums with real gaps are stored here (nothing for a complete
+    album), upserted or deleted per album as the scan progresses so results
+    are visible while the scan is still running and an album fixed since
+    the last scan disappears on the next one without a full wipe first."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rating_key: str = Field(unique=True)
+    artist: str
+    album: str
+    thumb: Optional[str] = None
+    expected_total: Optional[int] = None
+    owned_total: int
+    missing_count: int
+    missing_tracks_json: str
+    release_title: Optional[str] = None
+    checked_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DownloadStatus(str, Enum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"

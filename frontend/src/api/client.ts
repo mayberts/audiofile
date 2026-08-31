@@ -132,6 +132,31 @@ export interface TrackCheckOut {
   release_title: string | null;
 }
 
+export type TrackGapScanState = "running" | "completed" | "cancelled" | "failed";
+
+export interface TrackGapScanOut {
+  id: number;
+  status: TrackGapScanState;
+  total_albums: number;
+  checked_albums: number;
+  started_at: string;
+  finished_at: string | null;
+  last_error: string | null;
+}
+
+export interface AlbumTrackGapOut {
+  rating_key: string;
+  artist: string;
+  album: string;
+  thumb: string | null;
+  expected_total: number | null;
+  owned_total: number;
+  missing_count: number;
+  missing_tracks: string[];
+  release_title: string | null;
+  checked_at: string;
+}
+
 export interface PosterOut {
   key: string;
   thumb: string | null;
@@ -259,6 +284,10 @@ export const api = {
     }),
   unpinAlbumRelease: (albumRatingKey: string) =>
     request<LibraryAlbumOut>(`/api/plex/album/${albumRatingKey}/release/unpin`, { method: "POST" }),
+  getTrackGapScan: () => request<TrackGapScanOut | null>("/api/track-gaps/scan"),
+  startTrackGapScan: () => request<TrackGapScanOut>("/api/track-gaps/scan", { method: "POST" }),
+  cancelTrackGapScan: () => request<TrackGapScanOut>("/api/track-gaps/scan/cancel", { method: "POST" }),
+  listTrackGaps: () => request<AlbumTrackGapOut[]>("/api/track-gaps"),
   searchReleases: (artist: string, query: string) =>
     request<ReleaseEditionOut[]>(
       `/api/wanted/release-search?artist=${encodeURIComponent(artist)}&query=${encodeURIComponent(query)}`,

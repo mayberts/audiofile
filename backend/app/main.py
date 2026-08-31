@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import artists, downloads, plex, search, settings, wanted
+from .routers import artists, downloads, plex, search, settings, track_gaps, wanted
 from .scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +36,7 @@ app.include_router(wanted.router)
 app.include_router(plex.router)
 app.include_router(settings.router)
 app.include_router(artists.router)
+app.include_router(track_gaps.router)
 
 
 @app.get("/api/health")

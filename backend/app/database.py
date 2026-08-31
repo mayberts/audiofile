@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlmodel import Session, SQLModel, create_engine
+from datetime import datetime
+
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from .config import get_settings
 
@@ -14,6 +16,29 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _recover_interrupted_scans()
+
+
+def _recover_interrupted_scans() -> None:
+    """A TrackGapScan can only ever reach a terminal status
+    (completed/cancelled/failed) from inside run_track_gap_scan
+    (services/plex_gaps.py) itself -- so a row still "running" at startup
+    means the process died mid-scan (a container restart/redeploy) rather
+    than finishing normally. Left alone, that stuck row would block
+    POST /api/track-gaps/scan from ever starting a new scan again."""
+    from .models import TrackGapScan, TrackGapScanStatus
+
+    with Session(engine) as session:
+        stuck = session.exec(
+            select(TrackGapScan).where(TrackGapScan.status == TrackGapScanStatus.RUNNING)
+        ).all()
+        for scan in stuck:
+            scan.status = TrackGapScanStatus.FAILED
+            scan.last_error = "interrupted by restart"
+            scan.finished_at = datetime.utcnow()
+            session.add(scan)
+        if stuck:
+            session.commit()
 
 
 def _add_missing_columns() -> None:

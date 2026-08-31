@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
 
-from .models import DownloadStatus, WantedSource, WantedStatus
+from .models import DownloadStatus, TrackGapScanStatus, WantedSource, WantedStatus
 
 
 class SearchRequest(BaseModel):
@@ -185,6 +186,35 @@ class TrackCheckOut(BaseModel):
     missing_tracks: list[MissingTrackOut] = []
     release_mbid: Optional[str] = None
     release_title: Optional[str] = None
+
+
+class TrackGapScanOut(BaseModel):
+    id: int
+    status: TrackGapScanStatus
+    total_albums: int
+    checked_albums: int
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AlbumTrackGapOut(BaseModel):
+    rating_key: str
+    artist: str
+    album: str
+    thumb: Optional[str] = None
+    expected_total: Optional[int] = None
+    owned_total: int
+    missing_count: int
+    missing_tracks: list[str] = []
+    release_title: Optional[str] = None
+    checked_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class TestSlskdRequest(BaseModel):

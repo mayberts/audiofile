@@ -10,7 +10,17 @@ from .models import DownloadStatus, TrackGapScanStatus, WantedSource, WantedStat
 
 class SearchRequest(BaseModel):
     query: str
-    timeout_ms: int = 20000
+    # Matches _FIRST_RUNG_TIMEOUT_MS in services/wanted.py -- that value
+    # exists precisely because this project already learned the hard way
+    # that a much shorter budget (45s) isn't nearly enough for a single
+    # specific-query search against heavily-shared content, where a
+    # popular album can still be picking up its first handful of the
+    # (eventual) hundred-plus responses well past that mark. This manual
+    # search endpoint runs the exact same kind of single query, so it
+    # needs the same patience -- the previous 20s default gave up long
+    # before slskd's own UI (which has no such deadline) would still be
+    # accumulating real matches for the same search text.
+    timeout_ms: int = 120000
 
 
 class SearchFile(BaseModel):

@@ -65,6 +65,12 @@ export default function SearchPage() {
 
       {error && <div className="panel error-text">{error}</div>}
       {message && <div className="panel">{message}</div>}
+      {loading && (
+        <div className="panel muted">
+          Searching — this waits patiently for slow-to-respond peers, so less-shared content can take up to
+          a couple of minutes.
+        </div>
+      )}
 
       <div className="panel">
         {results.length === 0 && !loading && <div className="empty">No results yet — try a search above.</div>}

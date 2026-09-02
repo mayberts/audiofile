@@ -87,16 +87,21 @@ def _is_studio_album(rg: dict) -> bool:
 # "There Is". A close-text similarity fallback catches these without
 # needing its own edit-stripping rule for every individual case.
 #
-# Deliberately NOT a substring-containment check ("is the shorter title
-# contained in the longer one") even though that would also catch a
-# shortened marketing title against MusicBrainz's fuller one -- a
-# genuinely different, unowned version of a track routinely *is* the plain
-# title plus an appended qualifier ("Hit 'Em Up" vs "Hit 'Em Up (single
-# version)", confirmed for real by this album's own scan results), which
-# containment can't tell apart from harmless wording drift. The ratio
-# check below already fails that case on its own (a whole extra qualifier
-# phrase pulls it well under the threshold), without needing a separate
-# rule that would also swallow real gaps like that one.
+# Deliberately NOT a substring-containment check ("is the shorter title a
+# prefix of the longer one") in EITHER direction, even though that would
+# also catch cases like "What It Takes" vs. an owned tag of "What It
+# Takes / [hidden instrumental]" -- a shorter-candidate-is-prefix-of-owned
+# rule looks safe until you try it on "Yesterday" (MusicBrainz's plain
+# studio-track title) against an owned tag of "Yesterday (Live)": same
+# shape, but that's a genuinely different, unowned recording filed under
+# the wrong title, not the same one worded differently. There's no
+# reliable way to tell "extra bundled description" (safe) apart from "extra
+# version qualifier" (not safe) from string shape alone, in either
+# direction -- "Hit 'Em Up" vs MusicBrainz's own separate "Hit 'Em Up
+# (single version)" track is the same trap the other way round, confirmed
+# for real by this album's own scan results. The ratio check below still
+# catches ordinary spelling/wording drift; a real prefix/suffix qualifier
+# difference is left deliberately unmatched rather than guessed at.
 _FUZZY_MATCH_MIN_RATIO = 0.87
 
 # A trailing part/chapter/movement number is exactly the part of a title

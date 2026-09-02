@@ -278,6 +278,13 @@ tr:hover td {
   background: linear-gradient(160deg, var(--panel-2), var(--bg));
 }
 
+.artist-card-gap-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 1;
+}
+
 .artist-card-label {
   position: absolute;
   left: 0;

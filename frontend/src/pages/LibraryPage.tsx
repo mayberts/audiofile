@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, LibraryAlbumOut } from "../api/client";
+import { AlbumTrackGapOut, api, LibraryAlbumOut } from "../api/client";
 import { libraryStore } from "../libraryStore";
 
 interface ArtistSummary {
@@ -13,9 +13,16 @@ interface ArtistSummary {
   // "Add Artist" to browse their discography, not backed by anything in
   // the Plex-derived library snapshot.
   trackedOnly: boolean;
+  // How many of this artist's owned albums the last missing-tracks scan
+  // (see MissingTracksPage) flagged as having gaps.
+  albumsWithGaps: number;
 }
 
-function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): ArtistSummary[] {
+function summarizeByArtist(
+  albums: LibraryAlbumOut[],
+  trackedNames: string[],
+  gapRatingKeys: Set<string>,
+): ArtistSummary[] {
   // Keyed case-insensitively -- someone can (and did) type "steps" into Add
   // Artist while Plex/MusicBrainz's canonical casing is "Steps"; without
   // normalizing, those show up as two unrelated cards instead of merging
@@ -25,13 +32,22 @@ function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): A
     const key = a.artist.toLowerCase();
     let entry = byArtist.get(key);
     if (!entry) {
-      entry = { artist: a.artist, thumb: a.artist_thumb, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: false };
+      entry = {
+        artist: a.artist,
+        thumb: a.artist_thumb,
+        albumCount: 0,
+        trackCount: 0,
+        albumTitles: [],
+        trackedOnly: false,
+        albumsWithGaps: 0,
+      };
       byArtist.set(key, entry);
     }
     entry.albumCount += 1;
     entry.trackCount += a.track_count ?? 0;
     entry.albumTitles.push(a.album);
     if (!entry.thumb && a.artist_thumb) entry.thumb = a.artist_thumb;
+    if (a.rating_key && gapRatingKeys.has(a.rating_key)) entry.albumsWithGaps += 1;
   }
   // A tracked artist who already owns something just shows up as a normal
   // (non-tracked-only) card above, under the owned entry's (canonical)
@@ -40,7 +56,15 @@ function summarizeByArtist(albums: LibraryAlbumOut[], trackedNames: string[]): A
   for (const name of trackedNames) {
     const key = name.toLowerCase();
     if (!byArtist.has(key)) {
-      byArtist.set(key, { artist: name, thumb: null, albumCount: 0, trackCount: 0, albumTitles: [], trackedOnly: true });
+      byArtist.set(key, {
+        artist: name,
+        thumb: null,
+        albumCount: 0,
+        trackCount: 0,
+        albumTitles: [],
+        trackedOnly: true,
+        albumsWithGaps: 0,
+      });
     }
   }
   return [...byArtist.values()].sort((x, y) => x.artist.localeCompare(y.artist));
@@ -62,6 +86,14 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
       ) : (
         <div className="artist-card-fallback">{artist.artist.charAt(0).toUpperCase()}</div>
       )}
+      {artist.albumsWithGaps > 0 && (
+        <span
+          className="badge not_found artist-card-gap-badge"
+          title={`${artist.albumsWithGaps} album${artist.albumsWithGaps === 1 ? "" : "s"} with missing tracks`}
+        >
+          {artist.albumsWithGaps} missing
+        </span>
+      )}
       <div className="artist-card-label">
         <div className="artist-card-name">{artist.artist}</div>
         <div className="artist-card-meta">
@@ -76,8 +108,10 @@ function ArtistCard({ artist }: { artist: ArtistSummary }) {
 
 export default function LibraryPage() {
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
+  const [trackGaps, setTrackGaps] = useState<AlbumTrackGapOut[] | null>(libraryStore.trackGaps);
   const [trackedArtists, setTrackedArtists] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
+  const [gapsOnly, setGapsOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newArtist, setNewArtist] = useState("");
@@ -107,6 +141,19 @@ export default function LibraryPage() {
       });
   }
 
+  function loadTrackGaps() {
+    api
+      .listTrackGaps()
+      .then((rows) => {
+        libraryStore.trackGaps = rows;
+        setTrackGaps(rows);
+      })
+      .catch(() => {
+        // Non-critical -- the gap badges just don't show without this,
+        // same as a never-run scan.
+      });
+  }
+
   async function rescan() {
     setLoading(true);
     setError(null);
@@ -124,6 +171,9 @@ export default function LibraryPage() {
   useEffect(() => {
     if (libraryStore.albums === null) {
       load();
+    }
+    if (libraryStore.trackGaps === null) {
+      loadTrackGaps();
     }
     loadTrackedArtists();
   }, []);
@@ -148,16 +198,26 @@ export default function LibraryPage() {
     }
   }
 
-  const artists = useMemo(() => summarizeByArtist(albums || [], trackedArtists), [albums, trackedArtists]);
+  const gapRatingKeys = useMemo(() => new Set((trackGaps || []).map((g) => g.rating_key)), [trackGaps]);
+  const artists = useMemo(
+    () => summarizeByArtist(albums || [], trackedArtists, gapRatingKeys),
+    [albums, trackedArtists, gapRatingKeys],
+  );
   const totalTracks = useMemo(() => artists.reduce((sum, a) => sum + a.trackCount, 0), [artists]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return artists;
-    return artists.filter(
-      (a) => a.artist.toLowerCase().includes(q) || a.albumTitles.some((t) => t.toLowerCase().includes(q)),
-    );
-  }, [artists, filter]);
+    let result = artists;
+    if (q) {
+      result = result.filter(
+        (a) => a.artist.toLowerCase().includes(q) || a.albumTitles.some((t) => t.toLowerCase().includes(q)),
+      );
+    }
+    if (gapsOnly) {
+      result = result.filter((a) => a.albumsWithGaps > 0);
+    }
+    return result;
+  }, [artists, filter, gapsOnly]);
 
   return (
     <div>
@@ -170,6 +230,10 @@ export default function LibraryPage() {
           onChange={(e) => setFilter(e.target.value)}
           style={{ flex: 1 }}
         />
+        <label className="row" style={{ gap: "0.4rem", flexShrink: 0, cursor: "pointer" }}>
+          <input type="checkbox" checked={gapsOnly} onChange={(e) => setGapsOnly(e.target.checked)} />
+          Missing tracks only
+        </label>
         <button className="secondary" onClick={rescan} disabled={loading}>
           {loading ? "Scanning..." : "Scan Plex Library"}
         </button>
@@ -194,7 +258,7 @@ export default function LibraryPage() {
         <p className="muted" style={{ margin: "0 0 0.6rem" }}>
           {albums.length} album{albums.length === 1 ? "" : "s"} across {artists.length} artist
           {artists.length === 1 ? "" : "s"} · {totalTracks} track{totalTracks === 1 ? "" : "s"}
-          {filter.trim() && ` — ${filtered.length} matching`}
+          {(filter.trim() || gapsOnly) && ` — ${filtered.length} matching`}
         </p>
       )}
 
@@ -202,7 +266,9 @@ export default function LibraryPage() {
         <div className="panel empty">
           {artists.length === 0
             ? 'Nothing here yet — click "Scan Plex Library" above, or add an artist to browse.'
-            : "No artists match that filter."}
+            : gapsOnly
+              ? "No artists with missing tracks match that filter."
+              : "No artists match that filter."}
         </div>
       )}
 

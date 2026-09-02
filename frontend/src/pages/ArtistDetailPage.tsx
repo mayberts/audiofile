@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
+import { AlbumTrackGapOut, api, LibraryAlbumOut, MissingAlbumOut } from "../api/client";
 import ArtworkPicker from "../components/ArtworkPicker";
 import { libraryStore } from "../libraryStore";
 
 export default function ArtistDetailPage() {
   const { artist: artistName = "" } = useParams<{ artist: string }>();
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
+  const [trackGaps, setTrackGaps] = useState<AlbumTrackGapOut[] | null>(libraryStore.trackGaps);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +24,24 @@ export default function ArtistDetailPage() {
         .catch((err) => setError(err instanceof Error ? err.message : String(err)))
         .finally(() => setLoading(false));
     }
+    if (libraryStore.trackGaps === null) {
+      api
+        .listTrackGaps()
+        .then((rows) => {
+          libraryStore.trackGaps = rows;
+          setTrackGaps(rows);
+        })
+        .catch(() => {
+          // Non-critical -- gap badges just don't show without this.
+        });
+    }
   }, []);
+
+  const gapsByRatingKey = useMemo(() => {
+    const map = new Map<string, AlbumTrackGapOut>();
+    for (const g of trackGaps || []) map.set(g.rating_key, g);
+    return map;
+  }, [trackGaps]);
 
   // Case-insensitive on purpose: the URL's :artist param can come from a
   // tracked-only entry typed by hand ("steps") while Plex/MusicBrainz's own
@@ -156,7 +174,12 @@ export default function ArtistDetailPage() {
           {artistAlbums.length === 0 && (missingAlbums?.length ?? 0) === 0 && !missingLoading ? (
             <div className="panel empty">No albums found for this artist.</div>
           ) : (
-            <ArtistAlbumList artist={artistName} ownedAlbums={artistAlbums} missingAlbums={missingAlbums ?? []} />
+            <ArtistAlbumList
+              artist={artistName}
+              ownedAlbums={artistAlbums}
+              missingAlbums={missingAlbums ?? []}
+              gapsByRatingKey={gapsByRatingKey}
+            />
           )}
         </>
       )}
@@ -186,10 +209,12 @@ function ArtistAlbumList({
   artist,
   ownedAlbums,
   missingAlbums,
+  gapsByRatingKey,
 }: {
   artist: string;
   ownedAlbums: LibraryAlbumOut[];
   missingAlbums: MissingAlbumOut[];
+  gapsByRatingKey: Map<string, AlbumTrackGapOut>;
 }) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -264,7 +289,11 @@ function ArtistAlbumList({
       )}
       {rows.map((row) =>
         row.kind === "owned" ? (
-          <ArtistAlbumRow key={row.key} row={row} />
+          <ArtistAlbumRow
+            key={row.key}
+            row={row}
+            gap={row.owned.rating_key ? gapsByRatingKey.get(row.owned.rating_key) : undefined}
+          />
         ) : (
           <ArtistAlbumRow
             key={row.key}
@@ -282,10 +311,12 @@ function ArtistAlbumRow({
   row,
   pending,
   onDownload,
+  gap,
 }: {
   row: ArtistAlbumRowData;
   pending?: boolean;
   onDownload?: () => void;
+  gap?: AlbumTrackGapOut;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
   const coverUrl =
@@ -317,9 +348,16 @@ function ArtistAlbumRow({
         <div className="muted">{row.year ?? "—"}</div>
       </div>
       {row.kind === "owned" ? (
-        <span className="badge done" title="In your library" style={{ flexShrink: 0 }}>
-          &#10003;
-        </span>
+        gap ? (
+          <span className="badge not_found" style={{ flexShrink: 0 }}>
+            Missing {gap.missing_count}
+            {gap.expected_total ? ` of ${gap.expected_total}` : ""}
+          </span>
+        ) : (
+          <span className="badge done" title="In your library" style={{ flexShrink: 0 }}>
+            &#10003;
+          </span>
+        )
       ) : (
         <button
           className="secondary"

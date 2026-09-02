@@ -202,14 +202,28 @@ class MusicBrainzClient:
         return self._to_release_match(best)
 
     def search_release_candidates(self, artist: str, album: str, limit: int = 10) -> list[dict]:
-        """Raw release search hits for a track-by-track comparison caller
-        (see plex_gaps.get_missing_tracks_for_album) that needs to actually
-        try several editions rather than commit to search_release()'s
-        single relevance-ranked guess -- that guess prefers the fullest
-        (most tracks) edition among preferred types, which for someone who
-        owns a plain/standard pressing means comparing against a deluxe
+        """Candidate editions for a track-by-track comparison caller (see
+        plex_gaps.get_missing_tracks_for_album) that needs to actually try
+        several editions rather than commit to search_release()'s single
+        relevance-ranked guess -- that guess prefers the fullest (most
+        tracks) edition among preferred types, which for someone who owns
+        a plain/standard pressing means comparing against a deluxe
         reissue's bonus tracks they never had, and reporting them as
         "missing" tracks that were never really missing.
+
+        A capped top-`limit` text search isn't enough on its own to fix
+        that, though: a heavily-reissued classic album can have a dozen-
+        plus regional pressings/editions, and MusicBrainz's relevance
+        ranking across equally-good exact-text matches has no reason to
+        favor the plain one someone actually owns -- it can easily rank
+        outside the top `limit` entirely, in which case the caller never
+        even sees it and falls back to whatever bigger deluxe/bonus
+        edition did make the cut. What the initial search reliably
+        identifies even then is the right release-GROUP (that's what
+        artist+title match ranks on, not how big any specific pressing
+        is), so every official release under that group is fetched
+        instead of trusting the capped set to already include the
+        smallest one.
 
         Sorted smallest-track-count first: the caller fetches each
         candidate's full tracklist in this order and stops at the first
@@ -222,11 +236,27 @@ class MusicBrainzClient:
         releases = data.get("releases", [])
         if not releases:
             return []
+
+        release_group_mbid = (releases[0].get("release-group") or {}).get("id")
+        if release_group_mbid:
+            try:
+                full_editions = self.get_release_group_releases(release_group_mbid)
+            except Exception:
+                full_editions = []
+            if full_editions:
+                candidates = [
+                    {"id": e["release_mbid"], "track_count": e["track_count"]} for e in full_editions
+                ]
+                candidates.sort(key=lambda c: c["track_count"])
+                return candidates
+
         preferred = [
             r for r in releases if (r.get("release-group") or {}).get("primary-type") in _PREFERRED_PRIMARY_TYPES
         ]
-        candidates = preferred or releases
-        candidates.sort(key=_release_track_count)
+        candidates = [
+            {"id": r["id"], "track_count": _release_track_count(r)} for r in (preferred or releases)
+        ]
+        candidates.sort(key=lambda c: c["track_count"])
         return candidates
 
     def get_release(self, release_mbid: str) -> Optional[ReleaseMatch]:

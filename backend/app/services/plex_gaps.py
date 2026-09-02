@@ -328,6 +328,23 @@ def run_track_gap_scan(scan_id: int) -> None:
             session.add(scan)
             session.commit()
 
+        # Prunes AlbumTrackGap rows for albums no longer in the library at
+        # all -- the loop below (via _persist_gap_result) only ever
+        # upserts/deletes a gap row for whichever rating_key it's actively
+        # checking, which already handles an album going from "has gaps" to
+        # "complete" while it's still owned. It never touches a row whose
+        # rating_key isn't in this scan's LibraryAlbum snapshot in the
+        # first place (deleted from Plex, or -- the case that surfaced
+        # this -- a bad rip that got scanned once and later removed), so
+        # that row would otherwise report a phantom "missing tracks" album
+        # forever, surviving every future scan indefinitely.
+        current_rating_keys = {s[0] for s in album_snapshots}
+        with Session(engine) as session:
+            for gap in session.exec(select(AlbumTrackGap)).all():
+                if gap.rating_key not in current_rating_keys:
+                    session.delete(gap)
+            session.commit()
+
         def check_one(snapshot: tuple) -> None:
             rating_key, artist, album_title, thumb, pinned_release_mbid = snapshot
             try:

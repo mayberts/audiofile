@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import AlbumDetailPage from "./pages/AlbumDetailPage";
 import ArtistDetailPage from "./pages/ArtistDetailPage";
+import DashboardPage from "./pages/DashboardPage";
 import DownloadsPage from "./pages/DownloadsPage";
 import LibraryPage from "./pages/LibraryPage";
 import MissingTracksPage from "./pages/MissingTracksPage";
@@ -27,7 +28,8 @@ function BrandMark() {
 }
 
 const links = [
-  { to: "/", label: "Search", end: true },
+  { to: "/", label: "Home", end: true },
+  { to: "/search", label: "Search" },
   { to: "/library", label: "Library" },
   { to: "/downloads", label: "Downloads" },
   { to: "/wanted", label: "Wanted" },
@@ -53,7 +55,8 @@ export default function App() {
       </header>
       <main className="content">
         <Routes>
-          <Route path="/" element={<SearchPage />} />
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/library/:artist" element={<ArtistDetailPage />} />
           <Route path="/library/:artist/:album" element={<AlbumDetailPage />} />

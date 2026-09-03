@@ -295,10 +295,17 @@ function MissingTracksPanel({
               // like "Album: Side B") should enrich this same library
               // entry, not fork a second Plex album under the compared
               // release's name.
+              ratingKey={ratingKey}
               artist={artist}
               album={albumName}
               releaseMbid={result.release_mbid}
               tracks={result.missing_tracks}
+              // Dismissing a track changes what MusicBrainz comparison
+              // considers "missing" server-side -- re-running the same
+              // check (rather than just filtering it out of local state)
+              // keeps this in lockstep with what get_album_track_check
+              // would return on a fresh page load.
+              onDismissed={() => check(releaseOverride?.mbid)}
             />
           )}
         </>
@@ -317,18 +324,23 @@ function MissingTracksPanel({
 }
 
 function MissingTracksTable({
+  ratingKey,
   artist,
   album,
   releaseMbid,
   tracks,
+  onDismissed,
 }: {
+  ratingKey: string;
   artist: string;
   album: string;
   releaseMbid: string | null;
   tracks: MissingTrackOut[];
+  onDismissed: () => void;
 }) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<string | null>(null);
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onAdd(track: MissingTrackOut) {
@@ -341,6 +353,18 @@ function MissingTracksTable({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setPending(null);
+    }
+  }
+
+  async function onDismiss(track: MissingTrackOut) {
+    setDismissing(track.title);
+    setError(null);
+    try {
+      await api.dismissTrack(ratingKey, track.title);
+      onDismissed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDismissing(null);
     }
   }
 
@@ -363,14 +387,27 @@ function MissingTracksTable({
               <tr key={t.title}>
                 <td className="muted">{t.track_number ?? "—"}</td>
                 <td>{t.title}</td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   {added.has(t.title) ? (
                     <span className="badge downloaded">In wanted list</span>
                   ) : (
-                    <button className="secondary" onClick={() => onAdd(t)} disabled={pending === t.title}>
+                    <button
+                      className="secondary"
+                      style={{ marginRight: "0.4rem" }}
+                      onClick={() => onAdd(t)}
+                      disabled={pending === t.title}
+                    >
                       {pending === t.title ? "..." : "Add to Wanted"}
                     </button>
                   )}
+                  <button
+                    className="secondary"
+                    onClick={() => onDismiss(t)}
+                    disabled={dismissing === t.title}
+                    title="Not actually missing -- stop counting this track against this album"
+                  >
+                    {dismissing === t.title ? "..." : "Dismiss"}
+                  </button>
                 </td>
               </tr>
             ))}

@@ -191,6 +191,10 @@ class PinReleaseRequest(BaseModel):
     release_title: str
 
 
+class DismissTrackRequest(BaseModel):
+    title: str
+
+
 class TrackCheckOut(BaseModel):
     checked: bool
     expected_total: Optional[int] = None
@@ -222,6 +226,7 @@ class AlbumTrackGapOut(BaseModel):
     owned_total: int
     missing_count: int
     missing_tracks: list[str] = []
+    release_mbid: Optional[str] = None
     release_title: Optional[str] = None
     checked_at: datetime
 

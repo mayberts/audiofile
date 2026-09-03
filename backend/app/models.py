@@ -4,6 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -176,8 +177,27 @@ class AlbumTrackGap(SQLModel, table=True):
     owned_total: int
     missing_count: int
     missing_tracks_json: str
+    release_mbid: Optional[str] = None
     release_title: Optional[str] = None
     checked_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DismissedTrack(SQLModel, table=True):
+    """A specific track title someone has marked "not actually missing" for
+    one album -- a bonus track they don't care about, an alternate version
+    MusicBrainz lists separately, or a title that just doesn't parse
+    cleanly. Excluded from get_missing_tracks_for_album's missing list (and
+    therefore from both the live AlbumDetailPage check and the persisted
+    AlbumTrackGap snapshot) for that rating_key going forward, without
+    pretending the track is actually owned."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rating_key: str = Field(index=True)
+    title: str
+    normalized_title: str = Field(index=True)
+    dismissed_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("rating_key", "normalized_title", name="ix_dismissedtrack_rating_key_title"),)
 
 
 class DownloadStatus(str, Enum):

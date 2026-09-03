@@ -69,6 +69,7 @@ def list_track_gaps(session: Session = Depends(get_session)):
             owned_total=row.owned_total,
             missing_count=row.missing_count,
             missing_tracks=json.loads(row.missing_tracks_json),
+            release_mbid=row.release_mbid,
             release_title=row.release_title,
             checked_at=row.checked_at,
         )

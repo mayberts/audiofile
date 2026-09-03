@@ -13,7 +13,7 @@ from sqlmodel import Session, func, select, update
 from ..clients.musicbrainz import MusicBrainzClient
 from ..clients.plex import PlexNotConfigured, get_artist_album_titles, get_artist_item, get_plex_server
 from ..config import get_settings
-from ..models import AlbumTrackGap, LibraryAlbum, TrackGapScan, TrackGapScanStatus
+from ..models import AlbumTrackGap, DismissedTrack, LibraryAlbum, TrackGapScan, TrackGapScanStatus
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,11 @@ def _find_best_release(mb: MusicBrainzClient, artist: str, album: str, owned_nor
 
 
 def get_missing_tracks_for_album(
-    plex: PlexServer, mb: MusicBrainzClient, album_rating_key: str, release_mbid: str | None = None
+    plex: PlexServer,
+    mb: MusicBrainzClient,
+    album_rating_key: str,
+    release_mbid: str | None = None,
+    dismissed_normalized: set[str] | None = None,
 ) -> dict:
     """Compares the tracks Plex has for one album against MusicBrainz's
     canonical tracklist for that release — checked live, on demand, for just
@@ -194,7 +198,14 @@ def get_missing_tracks_for_album(
     bonus-disc/deluxe reissue MusicBrainz models as its own separate
     release with a different title ("Album: Side B") rather than another
     edition of the same release-group -- guessing from this album's own
-    title would never find it."""
+    title would never find it.
+
+    dismissed_normalized (see DismissedTrack / dismiss_track) excludes
+    specific track titles from "missing" without pretending they're owned
+    -- owned_total still reflects only what Plex actually has, so a
+    dismissed bonus track quietly stops counting against the album instead
+    of being folded into a number that would otherwise misrepresent what's
+    really in the library."""
     album = plex.fetchItem(int(album_rating_key))
     owned_normalized = {_normalize_title(t.title) for t in album.tracks()}
     empty = {
@@ -214,10 +225,12 @@ def get_missing_tracks_for_album(
     if not full_release or not full_release.tracks:
         return empty
 
+    dismissed = dismissed_normalized or set()
     missing = []
     for t in full_release.tracks:
         title = t.get("title") or ""
-        if _title_owned(_normalize_title(title), owned_normalized):
+        normalized = _normalize_title(title)
+        if _title_owned(normalized, owned_normalized) or normalized in dismissed:
             continue
         missing.append({"title": title, "track_number": t.get("position"), "disc": t.get("disc")})
 
@@ -229,6 +242,43 @@ def get_missing_tracks_for_album(
         "release_mbid": full_release.release_mbid,
         "release_title": full_release.title,
     }
+
+
+def dismiss_track(session: Session, rating_key: str, title: str) -> None:
+    """Marks one track title as "not actually missing" for this album --
+    idempotent (re-dismissing an already-dismissed title is a no-op).
+    Doesn't commit; caller does."""
+    normalized = _normalize_title(title)
+    existing = session.exec(
+        select(DismissedTrack).where(
+            DismissedTrack.rating_key == rating_key, DismissedTrack.normalized_title == normalized
+        )
+    ).first()
+    if existing is None:
+        session.add(DismissedTrack(rating_key=rating_key, title=title, normalized_title=normalized))
+
+
+def undismiss_track(session: Session, rating_key: str, title: str) -> None:
+    """Reverses dismiss_track -- a no-op if the title was never dismissed.
+    Doesn't commit; caller does."""
+    normalized = _normalize_title(title)
+    existing = session.exec(
+        select(DismissedTrack).where(
+            DismissedTrack.rating_key == rating_key, DismissedTrack.normalized_title == normalized
+        )
+    ).first()
+    if existing is not None:
+        session.delete(existing)
+
+
+def get_dismissed_titles(session: Session, rating_key: str) -> list[str]:
+    rows = session.exec(select(DismissedTrack).where(DismissedTrack.rating_key == rating_key)).all()
+    return [r.title for r in rows]
+
+
+def get_dismissed_normalized(session: Session, rating_key: str) -> set[str]:
+    rows = session.exec(select(DismissedTrack).where(DismissedTrack.rating_key == rating_key)).all()
+    return {r.normalized_title for r in rows}
 
 
 def get_owned_album_titles_from_snapshot(session: Session, artist_name: str) -> set[str]:
@@ -333,6 +383,15 @@ def run_track_gap_scan(scan_id: int) -> None:
             session.add(scan)
             session.commit()
 
+            # Snapshotted once up front (same reasoning as album_snapshots
+            # above) rather than queried per-album inside the thread pool --
+            # a plain indexed SELECT by rating_key would be cheap enough
+            # either way, but this avoids yet another DB round trip per
+            # album on top of everything else the scan already does.
+            dismissed_by_rating_key: dict[str, set[str]] = {}
+            for d in session.exec(select(DismissedTrack)).all():
+                dismissed_by_rating_key.setdefault(d.rating_key, set()).add(d.normalized_title)
+
         # Prunes AlbumTrackGap rows for albums no longer in the library at
         # all -- the loop below (via _persist_gap_result) only ever
         # upserts/deletes a gap row for whichever rating_key it's actively
@@ -353,7 +412,9 @@ def run_track_gap_scan(scan_id: int) -> None:
         def check_one(snapshot: tuple) -> None:
             rating_key, artist, album_title, thumb, pinned_release_mbid = snapshot
             try:
-                result = get_missing_tracks_for_album(plex, mb, rating_key, pinned_release_mbid)
+                result = get_missing_tracks_for_album(
+                    plex, mb, rating_key, pinned_release_mbid, dismissed_by_rating_key.get(rating_key)
+                )
             except Exception:
                 # One bad album (a stale rating_key, a transient MB error
                 # that exhausted its own retries) shouldn't abort a scan
@@ -426,6 +487,7 @@ def _upsert_gap_row(
             existing.owned_total = result["owned_total"]
             existing.missing_count = len(missing_titles)
             existing.missing_tracks_json = json.dumps(missing_titles)
+            existing.release_mbid = result["release_mbid"]
             existing.release_title = result["release_title"]
             existing.checked_at = datetime.utcnow()
             session.add(existing)
@@ -440,6 +502,7 @@ def _upsert_gap_row(
                     owned_total=result["owned_total"],
                     missing_count=len(missing_titles),
                     missing_tracks_json=json.dumps(missing_titles),
+                    release_mbid=result["release_mbid"],
                     release_title=result["release_title"],
                 )
             )
@@ -470,7 +533,8 @@ def refresh_album_gap(
     the snapshot stays stale a little longer, not that the pin/unpin itself
     fails."""
     try:
-        result = get_missing_tracks_for_album(plex, mb, rating_key, release_mbid)
+        dismissed = get_dismissed_normalized(session, rating_key)
+        result = get_missing_tracks_for_album(plex, mb, rating_key, release_mbid, dismissed)
     except Exception:
         logger.exception(
             "could not refresh track-gap row for album %s (%s - %s) after a pin change",

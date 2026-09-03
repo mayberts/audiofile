@@ -24,6 +24,7 @@ from ..database import get_session
 from ..models import LibraryAlbum, WantedItem, WantedSource, compute_wanted_dedup_key
 from ..schemas import (
     AddMissingAlbumRequest,
+    DismissTrackRequest,
     LibraryAlbumOut,
     MissingAlbumOut,
     PinReleaseRequest,
@@ -34,7 +35,15 @@ from ..schemas import (
     TrackOut,
     WantedOut,
 )
-from ..services.plex_gaps import get_missing_albums_for_artist, get_missing_tracks_for_album, refresh_album_gap
+from ..services.plex_gaps import (
+    dismiss_track,
+    get_dismissed_normalized,
+    get_dismissed_titles,
+    get_missing_albums_for_artist,
+    get_missing_tracks_for_album,
+    refresh_album_gap,
+    undismiss_track,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,12 +181,13 @@ def get_album_tracks_endpoint(rating_key: str):
 
 
 @router.get("/album/{rating_key}/track-check", response_model=TrackCheckOut)
-def get_album_track_check(rating_key: str, release_mbid: str | None = None):
+def get_album_track_check(rating_key: str, release_mbid: str | None = None, session: Session = Depends(get_session)):
     settings = get_settings()
     mb = MusicBrainzClient(settings)
     try:
         plex = get_plex_server(settings)
-        return get_missing_tracks_for_album(plex, mb, rating_key, release_mbid)
+        dismissed = get_dismissed_normalized(session, rating_key)
+        return get_missing_tracks_for_album(plex, mb, rating_key, release_mbid, dismissed)
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:
@@ -226,6 +236,34 @@ def unpin_album_release(rating_key: str, session: Session = Depends(get_session)
     session.refresh(row)
     _refresh_gap_for_row(session, row)
     return row
+
+
+@router.post("/album/{rating_key}/dismissed-tracks", response_model=list[str])
+def dismiss_album_track(rating_key: str, payload: DismissTrackRequest, session: Session = Depends(get_session)):
+    """Marks one specific missing-track title as not actually missing (see
+    DismissedTrack) -- used from the Missing Tracks page for a track that
+    doesn't belong in the count (a bonus track nobody cares about, an
+    alternate version MusicBrainz lists separately, a title that just
+    doesn't parse right). Immediately refreshes this album's persisted gap
+    row so the change is reflected without waiting for the next scan."""
+    row = session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="album not found in library snapshot")
+    dismiss_track(session, rating_key, payload.title)
+    session.commit()
+    _refresh_gap_for_row(session, row)
+    return get_dismissed_titles(session, rating_key)
+
+
+@router.delete("/album/{rating_key}/dismissed-tracks", response_model=list[str])
+def undismiss_album_track(rating_key: str, title: str, session: Session = Depends(get_session)):
+    row = session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="album not found in library snapshot")
+    undismiss_track(session, rating_key, title)
+    session.commit()
+    _refresh_gap_for_row(session, row)
+    return get_dismissed_titles(session, rating_key)
 
 
 def _refresh_gap_for_row(session: Session, row: LibraryAlbum) -> None:

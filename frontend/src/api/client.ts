@@ -153,6 +153,7 @@ export interface AlbumTrackGapOut {
   owned_total: number;
   missing_count: number;
   missing_tracks: string[];
+  release_mbid: string | null;
   release_title: string | null;
   checked_at: string;
 }
@@ -290,6 +291,15 @@ export const api = {
   startTrackGapScan: () => request<TrackGapScanOut>("/api/track-gaps/scan", { method: "POST" }),
   cancelTrackGapScan: () => request<TrackGapScanOut>("/api/track-gaps/scan/cancel", { method: "POST" }),
   listTrackGaps: () => request<AlbumTrackGapOut[]>("/api/track-gaps"),
+  dismissTrack: (albumRatingKey: string, title: string) =>
+    request<string[]>(`/api/plex/album/${albumRatingKey}/dismissed-tracks`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+  undismissTrack: (albumRatingKey: string, title: string) =>
+    request<string[]>(`/api/plex/album/${albumRatingKey}/dismissed-tracks?title=${encodeURIComponent(title)}`, {
+      method: "DELETE",
+    }),
   searchReleases: (artist: string, query: string) =>
     request<ReleaseEditionOut[]>(
       `/api/wanted/release-search?artist=${encodeURIComponent(artist)}&query=${encodeURIComponent(query)}`,

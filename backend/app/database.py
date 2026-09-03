@@ -121,6 +121,11 @@ def _add_missing_columns() -> None:
             conn.commit()
             _backfill_wanted_dedup_keys(conn)
 
+        existing_gap = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(albumtrackgap)")}
+        if "release_mbid" not in existing_gap:
+            conn.exec_driver_sql("ALTER TABLE albumtrackgap ADD COLUMN release_mbid VARCHAR")
+            conn.commit()
+
         existing_library = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(libraryalbum)")}
         if "pinned_release_mbid" not in existing_library:
             conn.exec_driver_sql("ALTER TABLE libraryalbum ADD COLUMN pinned_release_mbid VARCHAR")

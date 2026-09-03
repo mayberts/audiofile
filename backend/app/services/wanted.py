@@ -11,6 +11,7 @@ from ..clients.slskd import SlskdClient, SlskdError
 from ..config import Settings
 from ..models import DownloadRecord, DownloadStatus, WantedItem, WantedReviewCandidate, WantedStatus
 from . import search as search_service
+from .downloads import remote_basename
 from .track_parsing import extract_track_number as _extract_track_number
 from .track_parsing import extract_track_title as _extract_track_title
 
@@ -170,6 +171,11 @@ def process_wanted_item(
     matches: list[search_service.SearchFile] = []
     results: list[search_service.SearchFile] = []
     candidates: list[search_service.ScoredFolder] = []
+    # Set only when a track want's title-confidence filter (below) rejects
+    # every result -- lets the final "not found" branch explain *why*
+    # instead of just "no matching files", since from the outside that
+    # looks identical to slskd genuinely having nothing, which it didn't.
+    rejected_best: tuple[str, float] | None = None
 
     if is_album_want:
         ladder = _query_ladder(item, year)
@@ -252,12 +258,13 @@ def process_wanted_item(
             # picks purely on file quality (format/bitrate/peer speed),
             # happily grabbing a great-quality copy of the wrong version.
             before = len(results)
-            results = [
-                r
-                for r in results
-                if search_service.title_confidence(r, item.artist, item.album, item.track)
-                >= search_service.TRACK_TITLE_CONFIDENCE_FLOOR
+            scored = [
+                (r, search_service.title_confidence(r, item.artist, item.album, item.track)) for r in results
             ]
+            results = [r for r, confidence in scored if confidence >= search_service.TRACK_TITLE_CONFIDENCE_FLOOR]
+            if not results and scored:
+                closest_reject, closest_confidence = max(scored, key=lambda pair: pair[1])
+                rejected_best = (remote_basename(closest_reject.filename), closest_confidence)
             logger.info(
                 "wanted item %s: %d of %d results actually look like %r (not a remix/live/alternate "
                 "version) after title-confidence filtering",
@@ -281,7 +288,15 @@ def process_wanted_item(
 
     if not matches:
         item.status = WantedStatus.NOT_FOUND
-        item.last_error = "no matching files found on Soulseek"
+        if rejected_best:
+            filename, confidence = rejected_best
+            item.last_error = (
+                f"found results, but none looked like the right recording (closest: {filename!r}, "
+                f"{confidence:.0%} title match) -- possibly a remix/live/alternate version, or the "
+                f"filename just didn't parse cleanly. Search manually to check."
+            )
+        else:
+            item.last_error = "no matching files found on Soulseek"
         session.add(item)
         session.commit()
         return

@@ -35,6 +35,37 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _recover_interrupted_scans()
+    _recover_interrupted_wanted_scans()
+
+
+def _recover_interrupted_wanted_scans() -> None:
+    """A WantedItem only ever reaches SEARCHING from inside
+    process_wanted_item (services/wanted.py), which always moves it on to
+    a terminal-for-this-attempt outcome (NOT_FOUND/FAILED/AWAITING_REVIEW,
+    DOWNLOADING with records, or deletion on success) before returning --
+    so a row still SEARCHING at startup means the background task that
+    claimed it died mid-scan (a container restart/redeploy), not that a
+    scan is genuinely still running (nothing can be, this process just
+    started).
+
+    downloads.reconcile_stuck_wanted_items (scheduler.py, runs every poll
+    tick) already recovers a stuck DOWNLOADING item once its
+    DownloadRecords reach a terminal state, but a SEARCHING item that
+    never got that far has no DownloadRecord to reconcile against, so
+    that check is permanently a no-op for it. And process_wanted_item's
+    own atomic claim explicitly skips any row already SEARCHING/
+    DOWNLOADING, so even clicking "Scan" again on a row like this
+    silently does nothing -- without this, it would sit there forever."""
+    from .models import WantedItem, WantedStatus
+
+    with Session(engine) as session:
+        stuck = session.exec(select(WantedItem).where(WantedItem.status == WantedStatus.SEARCHING)).all()
+        for item in stuck:
+            item.status = WantedStatus.WANTED
+            item.last_error = "interrupted by a restart mid-search -- will retry automatically"
+            session.add(item)
+        if stuck:
+            session.commit()
 
 
 def _recover_interrupted_scans() -> None:

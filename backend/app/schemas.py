@@ -10,16 +10,18 @@ from .models import DownloadStatus, TrackGapScanStatus, WantedSource, WantedStat
 
 class SearchRequest(BaseModel):
     query: str
-    # Matches _FIRST_RUNG_TIMEOUT_MS in services/wanted.py -- that value
-    # exists precisely because this project already learned the hard way
-    # that a much shorter budget (45s) isn't nearly enough for a single
-    # specific-query search against heavily-shared content, where a
-    # popular album can still be picking up its first handful of the
-    # (eventual) hundred-plus responses well past that mark. This manual
-    # search endpoint runs the exact same kind of single query, so it
-    # needs the same patience -- the previous 20s default gave up long
-    # before slskd's own UI (which has no such deadline) would still be
-    # accumulating real matches for the same search text.
+    # This endpoint runs synchronously inside the request (unlike
+    # services/wanted.py's searches, which all run as background tasks and
+    # can afford to wait much longer -- see _FIRST_RUNG_TIMEOUT_MS), so its
+    # patience is deliberately capped well under nginx's proxy_read_timeout
+    # (160s -- see frontend/nginx.conf) rather than matching that value:
+    # raising this without also raising nginx's timeout would just trade
+    # "gives up too early" for "the connection gets killed before the
+    # backend even finishes." 120s already fixed the original problem this
+    # was tuned for (a 20s default that gave up long before slskd's own UI,
+    # which has no deadline, would still be accumulating real matches) --
+    # if a search needs more patience than that, add it to the wanted list
+    # instead, where it isn't bound by a live connection at all.
     timeout_ms: int = 120000
 
 

@@ -18,7 +18,19 @@ from .track_parsing import extract_track_title as _extract_track_title
 # Broader ladder rungs are only reached after a narrower one already came up
 # with no viable candidate, so they lean on cast-a-wider-net response volume
 # rather than needing the full patience of the first, most-specific query.
-_FIRST_RUNG_TIMEOUT_MS = 120000
+#
+# 120s (the value this used to be) already wasn't always enough: a heavily-
+# shared, hyper-popular query can still be actively accumulating responses
+# in slskd several minutes in -- confirmed for real by watching one still
+# running in slskd's own UI long after this had already given up and
+# settled for "not found" with whatever had arrived by then. Every caller
+# of process_wanted_item now runs as a background task (see routers/
+# wanted.py's scan-now and scan-all), not inside a live HTTP request, so
+# there's no request/proxy timeout this needs to fit inside anymore --
+# search() itself still breaks out early via isComplete for the (typical)
+# case that resolves quickly, so a more patient ceiling only costs
+# anything on the slow outliers it exists to help.
+_FIRST_RUNG_TIMEOUT_MS = 300000
 _LATER_RUNG_TIMEOUT_MS = 45000
 # Cap on how many scored candidates get pooled for manual review -- enough
 # to give a real choice without dumping every long-tail scraped result on

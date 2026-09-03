@@ -213,20 +213,41 @@ def delete_wanted(wanted_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/{wanted_id}/scan-now", response_model=WantedOut)
-def scan_now(wanted_id: int, session: Session = Depends(get_session)):
+def scan_now(wanted_id: int, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    """Kicks off in the background, same as scan-all -- this used to run
+    process_wanted_item synchronously inside the request, which meant the
+    HTTP connection (and nginx's own proxy_read_timeout in front of it) had
+    to stay open for however long a single Soulseek search took. That's
+    fine for a search that resolves in a few seconds, but a heavily-shared
+    query can legitimately still be accumulating responses well past two
+    minutes -- confirmed for real against a search that was still actively
+    running in slskd's own UI long after this endpoint had already given up
+    and returned "not found" with whatever had arrived by its own deadline.
+    Backgrounding it removes that artificial ceiling entirely; the item's
+    status (visible via GET /api/wanted, which the Wanted page already
+    polls) reflects progress instead of the response body."""
     item = session.get(WantedItem, wanted_id)
     if not item:
         raise HTTPException(status_code=404, detail="wanted item not found")
 
-    settings = get_settings()
-    slskd = SlskdClient.from_settings(settings)
-    mb = MusicBrainzClient(settings)
-    try:
-        process_wanted_item(session, item, slskd, settings, mb)
-    finally:
-        slskd.close()
-        mb.close()
-    session.refresh(item)
+    def _run() -> None:
+        settings = get_settings()
+        from sqlmodel import Session as _Session
+
+        from ..database import engine
+
+        slskd = SlskdClient.from_settings(settings)
+        mb = MusicBrainzClient(settings)
+        try:
+            with _Session(engine) as bg_session:
+                bg_item = bg_session.get(WantedItem, wanted_id)
+                if bg_item:
+                    process_wanted_item(bg_session, bg_item, slskd, settings, mb)
+        finally:
+            slskd.close()
+            mb.close()
+
+    background_tasks.add_task(_run)
     return item
 
 

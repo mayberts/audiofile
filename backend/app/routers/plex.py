@@ -34,7 +34,7 @@ from ..schemas import (
     TrackOut,
     WantedOut,
 )
-from ..services.plex_gaps import get_missing_albums_for_artist, get_missing_tracks_for_album
+from ..services.plex_gaps import get_missing_albums_for_artist, get_missing_tracks_for_album, refresh_album_gap
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +210,7 @@ def pin_album_release(rating_key: str, payload: PinReleaseRequest, session: Sess
     session.add(row)
     session.commit()
     session.refresh(row)
+    _refresh_gap_for_row(session, row)
     return row
 
 
@@ -223,7 +224,31 @@ def unpin_album_release(rating_key: str, session: Session = Depends(get_session)
     session.add(row)
     session.commit()
     session.refresh(row)
+    _refresh_gap_for_row(session, row)
     return row
+
+
+def _refresh_gap_for_row(session: Session, row: LibraryAlbum) -> None:
+    """Keeps the persisted AlbumTrackGap snapshot (Library page badges,
+    Missing Tracks page) in sync with a pin/unpin -- without this, picking
+    a different release edition here has no effect on those pages until
+    the next full library-wide scan, which on a large library can be a
+    long time away. Best-effort: the pin/unpin itself already committed
+    successfully by the time this runs, so a Plex/MusicBrainz hiccup here
+    shouldn't turn into an error response for what the user actually did."""
+    if not row.rating_key:
+        return
+    settings = get_settings()
+    mb = MusicBrainzClient(settings)
+    try:
+        plex = get_plex_server(settings)
+        refresh_album_gap(
+            session, plex, mb, row.rating_key, row.artist, row.album, row.thumb, row.pinned_release_mbid
+        )
+    except Exception:
+        logger.exception("could not refresh track-gap row for album %s after pin change", row.rating_key)
+    finally:
+        mb.close()
 
 
 @router.get("/item/{rating_key}/posters", response_model=list[PosterOut])

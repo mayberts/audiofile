@@ -401,6 +401,88 @@ def _scan_cancel_requested(engine, scan_id: int) -> bool:
         return bool(scan and scan.cancel_requested)
 
 
+def _upsert_gap_row(
+    session: Session,
+    rating_key: str,
+    artist: str,
+    album_title: str,
+    thumb: str | None,
+    result: dict | None,
+) -> None:
+    """Upserts/deletes this one album's AlbumTrackGap row from a freshly
+    computed get_missing_tracks_for_album result. Shared by the full
+    library-wide scan (_persist_gap_result, below) and refresh_album_gap
+    (a single-album on-demand refresh) so both paths can never disagree
+    about what counts as "has a gap" -- doesn't commit, callers do."""
+    existing = session.exec(select(AlbumTrackGap).where(AlbumTrackGap.rating_key == rating_key)).first()
+
+    if result and result["checked"] and result["missing_tracks"]:
+        missing_titles = [t["title"] for t in result["missing_tracks"]]
+        if existing:
+            existing.artist = artist
+            existing.album = album_title
+            existing.thumb = thumb
+            existing.expected_total = result["expected_total"]
+            existing.owned_total = result["owned_total"]
+            existing.missing_count = len(missing_titles)
+            existing.missing_tracks_json = json.dumps(missing_titles)
+            existing.release_title = result["release_title"]
+            existing.checked_at = datetime.utcnow()
+            session.add(existing)
+        else:
+            session.add(
+                AlbumTrackGap(
+                    rating_key=rating_key,
+                    artist=artist,
+                    album=album_title,
+                    thumb=thumb,
+                    expected_total=result["expected_total"],
+                    owned_total=result["owned_total"],
+                    missing_count=len(missing_titles),
+                    missing_tracks_json=json.dumps(missing_titles),
+                    release_title=result["release_title"],
+                )
+            )
+    elif existing:
+        # Complete now (or no longer resolvable on MusicBrainz) -- either
+        # way it's not a gap anymore, don't leave a stale row claiming it
+        # still is.
+        session.delete(existing)
+
+
+def refresh_album_gap(
+    session: Session,
+    plex: PlexServer,
+    mb: MusicBrainzClient,
+    rating_key: str,
+    artist: str,
+    album_title: str,
+    thumb: str | None,
+    release_mbid: str | None,
+) -> None:
+    """Recomputes and upserts/deletes just this one album's AlbumTrackGap
+    row -- called right after pinning/unpinning a release (routers/plex.py)
+    so the Library page badges and Missing Tracks page reflect the change
+    immediately instead of staying stale until the next full library-wide
+    scan, which on a large library can be hours (or days) away. Best-effort:
+    a caller invokes this after its own change already committed
+    successfully, so a transient MusicBrainz/Plex failure here just means
+    the snapshot stays stale a little longer, not that the pin/unpin itself
+    fails."""
+    try:
+        result = get_missing_tracks_for_album(plex, mb, rating_key, release_mbid)
+    except Exception:
+        logger.exception(
+            "could not refresh track-gap row for album %s (%s - %s) after a pin change",
+            rating_key,
+            artist,
+            album_title,
+        )
+        return
+    _upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
+    session.commit()
+
+
 def _persist_gap_result(
     engine,
     scan_id: int,
@@ -420,41 +502,7 @@ def _persist_gap_result(
     a plain "scan.checked_albums += 1; commit()" would lose updates under
     real concurrency (two workers both reading the same starting value)."""
     with Session(engine) as session:
-        existing = session.exec(select(AlbumTrackGap).where(AlbumTrackGap.rating_key == rating_key)).first()
-
-        if result and result["checked"] and result["missing_tracks"]:
-            missing_titles = [t["title"] for t in result["missing_tracks"]]
-            if existing:
-                existing.artist = artist
-                existing.album = album_title
-                existing.thumb = thumb
-                existing.expected_total = result["expected_total"]
-                existing.owned_total = result["owned_total"]
-                existing.missing_count = len(missing_titles)
-                existing.missing_tracks_json = json.dumps(missing_titles)
-                existing.release_title = result["release_title"]
-                existing.checked_at = datetime.utcnow()
-                session.add(existing)
-            else:
-                session.add(
-                    AlbumTrackGap(
-                        rating_key=rating_key,
-                        artist=artist,
-                        album=album_title,
-                        thumb=thumb,
-                        expected_total=result["expected_total"],
-                        owned_total=result["owned_total"],
-                        missing_count=len(missing_titles),
-                        missing_tracks_json=json.dumps(missing_titles),
-                        release_title=result["release_title"],
-                    )
-                )
-        elif existing:
-            # Complete now (or no longer resolvable on MusicBrainz) -- either
-            # way it's not a gap anymore, don't leave a stale row claiming it
-            # still is.
-            session.delete(existing)
-
+        _upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
         session.exec(
             update(TrackGapScan)
             .where(TrackGapScan.id == scan_id)

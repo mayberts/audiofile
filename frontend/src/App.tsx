@@ -10,16 +10,18 @@ import SettingsPage from "./pages/SettingsPage";
 import WantedPage from "./pages/WantedPage";
 
 function BrandMark() {
-  // A solid badge, not line art -- the previous cassette icon had too much
-  // fine detail (thin strokes, several small shapes) to read at nav size,
-  // and the glow filter on top of it just blurred it further. A filled
-  // rounded-square badge with a bold vinyl-record glyph reads clearly even
-  // at 20-something px, the same pattern most small app marks use.
+  // A turntable viewed from directly above: the platter (ring + spindle),
+  // and a tonearm pivoting from its post down to a headshell resting near
+  // the record's edge. Kept to a handful of bold shapes (no groove detail,
+  // no thin lines) so it still reads clearly at ~26px in the nav.
   return (
     <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
       <rect width="32" height="32" rx="9" fill="var(--accent)" />
-      <circle cx="16" cy="16" r="9.5" fill="none" stroke="white" strokeWidth="2.25" />
-      <circle cx="16" cy="16" r="3.4" fill="white" />
+      <circle cx="14" cy="18" r="8.5" fill="none" stroke="white" strokeWidth="2" />
+      <circle cx="14" cy="18" r="1.7" fill="white" />
+      <circle cx="23" cy="9" r="1.9" fill="white" />
+      <path d="M23 9 18.2 12.3" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="18.2" cy="12.3" r="1.4" fill="white" />
     </svg>
   );
 }

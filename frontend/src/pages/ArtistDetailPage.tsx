@@ -111,38 +111,49 @@ export default function ArtistDetailPage() {
         </Link>
       </p>
 
-      <div className="row" style={{ alignItems: "center", marginBottom: "1rem", gap: "1rem" }}>
-        {artistRatingKey && (
-          <button
-            className="image-edit-trigger"
-            onClick={() => setShowArtworkPicker(true)}
-            title="Change artwork"
-          >
-            {artistThumb ? (
-              <img
-                src={api.plexImageUrl(artistThumb)}
-                alt={artistName}
-                style={{ width: 72, height: 72, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-              />
-            ) : (
-              <div
-                className="artist-card-fallback"
-                style={{ width: 72, height: 72, borderRadius: 8, fontSize: "1.4rem" }}
-              >
-                {artistName.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="image-edit-overlay">Edit</div>
-          </button>
+      <div className="detail-hero">
+        {artistThumb ? (
+          <div
+            className="detail-hero-backdrop"
+            style={{ backgroundImage: `url(${api.plexImageUrl(artistThumb)})` }}
+          />
+        ) : (
+          <div className="detail-hero-backdrop-fallback" />
         )}
-        <div>
-          <h1 style={{ margin: 0 }}>{artistName}</h1>
-          {artistAlbums.length > 0 && (
-            <p className="muted" style={{ margin: "0.2rem 0 0" }}>
-              {artistAlbums.length} album{artistAlbums.length === 1 ? "" : "s"} · {totalTracks} track
-              {totalTracks === 1 ? "" : "s"}
-            </p>
+        <div className="detail-hero-overlay" />
+        <div className="detail-hero-content">
+          {artistRatingKey && (
+            <button
+              className="image-edit-trigger detail-hero-art"
+              onClick={() => setShowArtworkPicker(true)}
+              title="Change artwork"
+            >
+              {artistThumb ? (
+                <img
+                  src={api.plexImageUrl(artistThumb)}
+                  alt={artistName}
+                  style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover", display: "block" }}
+                />
+              ) : (
+                <div
+                  className="artist-card-fallback"
+                  style={{ width: "100%", height: "100%", borderRadius: "inherit", fontSize: "2.6rem" }}
+                >
+                  {artistName.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="image-edit-overlay">Edit</div>
+            </button>
           )}
+          <div>
+            <h1 className="detail-hero-title">{artistName}</h1>
+            {artistAlbums.length > 0 && (
+              <p className="detail-hero-meta">
+                {artistAlbums.length} album{artistAlbums.length === 1 ? "" : "s"} · {totalTracks} track
+                {totalTracks === 1 ? "" : "s"}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

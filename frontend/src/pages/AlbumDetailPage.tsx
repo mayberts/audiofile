@@ -245,7 +245,7 @@ function MissingTracksPanel({
   return (
     <div style={{ marginTop: "1rem" }}>
       {!result && !loading && (
-        <button className="secondary" onClick={() => check(releaseOverride?.mbid)} disabled={!ratingKey}>
+        <button onClick={() => check(releaseOverride?.mbid)} disabled={!ratingKey}>
           Check for Missing Tracks
         </button>
       )}

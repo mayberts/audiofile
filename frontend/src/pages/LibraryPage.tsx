@@ -234,7 +234,7 @@ export default function LibraryPage() {
           <input type="checkbox" checked={gapsOnly} onChange={(e) => setGapsOnly(e.target.checked)} />
           Missing tracks only
         </label>
-        <button className="secondary" onClick={rescan} disabled={loading}>
+        <button onClick={rescan} disabled={loading}>
           {loading ? "Scanning..." : "Scan Plex Library"}
         </button>
       </div>
@@ -247,7 +247,7 @@ export default function LibraryPage() {
           onChange={(e) => setNewArtist(e.target.value)}
           style={{ flex: 1 }}
         />
-        <button type="submit" className="secondary" disabled={adding || !newArtist.trim()}>
+        <button type="submit" disabled={adding || !newArtist.trim()}>
           {adding ? "Adding..." : "+ Add Artist"}
         </button>
       </form>

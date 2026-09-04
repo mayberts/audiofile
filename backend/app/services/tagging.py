@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from mutagen import File as MutagenFile
@@ -10,6 +11,8 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 
 from ..clients.musicbrainz import TrackMetadata
+
+logger = logging.getLogger(__name__)
 
 
 def tag_file(path: Path, meta: TrackMetadata, cover_bytes: bytes | None) -> None:
@@ -43,10 +46,18 @@ def _tag_mp3(path: Path, meta: TrackMetadata, cover_bytes: bytes | None) -> None
         tags["genre"] = meta.genre
     tags.save(path)
 
+    # Cover art is a nice-to-have on top of the tags that actually matter
+    # (artist/album/title/etc, already saved above) -- an oversized or
+    # otherwise malformed image (e.g. an unusually large Cover Art Archive
+    # scan) shouldn't take the whole track down and leave it stuck
+    # FAILED/unorganized when the tags themselves are perfectly fine.
     if cover_bytes:
-        id3 = ID3(path)
-        id3.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover_bytes))
-        id3.save(path)
+        try:
+            id3 = ID3(path)
+            id3.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover_bytes))
+            id3.save(path)
+        except Exception:
+            logger.warning("could not embed cover art in %s -- tagged without it", path, exc_info=True)
 
 
 def _tag_flac(path: Path, meta: TrackMetadata, cover_bytes: bytes | None) -> None:
@@ -68,6 +79,19 @@ def _tag_flac(path: Path, meta: TrackMetadata, cover_bytes: bytes | None) -> Non
         pic.type = 3
         pic.mime = "image/jpeg"
         audio.add_picture(pic)
+        try:
+            audio.save()
+            return
+        except Exception:
+            # FLAC metadata blocks (including an embedded picture) have a
+            # hard 24-bit length limit (~16MB) -- a larger-than-usual Cover
+            # Art Archive scan blows past that and mutagen raises
+            # error("block is too long to write"). Falling back to saving
+            # without the picture keeps the actual tags (and therefore the
+            # import) intact instead of failing the whole track over
+            # artwork.
+            logger.warning("could not embed cover art in %s -- retrying without it", path, exc_info=True)
+            audio.clear_pictures()
 
     audio.save()
 
@@ -86,6 +110,12 @@ def _tag_mp4(path: Path, meta: TrackMetadata, cover_bytes: bytes | None) -> None
 
     if cover_bytes:
         audio["covr"] = [MP4Cover(cover_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
+        try:
+            audio.save()
+            return
+        except Exception:
+            logger.warning("could not embed cover art in %s -- retrying without it", path, exc_info=True)
+            del audio["covr"]
 
     audio.save()
 

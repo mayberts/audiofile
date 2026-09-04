@@ -136,6 +136,24 @@ def process_wanted_item(
         return
     session.refresh(item)
 
+    # A peer whose transfer already failed/was rejected for this item (see
+    # _sync_wanted_item, services/downloads.py) is worth ruling out on a
+    # retry rather than scoring right back to the top and enqueueing the
+    # exact same doomed transfer again -- the DownloadRecord from that
+    # attempt is never deleted, so it's still right here to check against.
+    # Excluded by username rather than the specific failed filename: a
+    # peer that rejected one transfer (queue full, throttling us, offline)
+    # is unlikely to behave differently for a different file of theirs in
+    # the same search.
+    failed_usernames = {
+        r.slskd_username
+        for r in session.exec(
+            select(DownloadRecord).where(
+                DownloadRecord.wanted_item_id == item.id, DownloadRecord.status == DownloadStatus.FAILED
+            )
+        ).all()
+    }
+
     # An album want should grab everything one peer has in one folder, not
     # just the single highest-scored file across everyone — that's what was
     # producing one random track instead of the whole album. Only applies
@@ -213,6 +231,8 @@ def process_wanted_item(
                 return
 
             results = search_service.parse_search_responses(raw)
+            if failed_usernames:
+                results = [r for r in results if r.username not in failed_usernames]
             candidates = search_service.score_album_candidates(
                 results,
                 settings,
@@ -262,6 +282,8 @@ def process_wanted_item(
             session.commit()
             return
         results = search_service.parse_search_responses(raw)
+        if failed_usernames:
+            results = [r for r in results if r.username not in failed_usernames]
         if item.track:
             # A plain substring search for "{artist} {track}" has no idea
             # that a hit titled "Song (TELYKAST Remix)" or "Song (Live)" is
@@ -419,8 +441,15 @@ def _enqueue_matches(
             record.status = DownloadStatus.FAILED
             record.error = str(exc)
             session.add(record)
-        item.status = WantedStatus.FAILED
-        item.last_error = str(exc)
+        # NOT_FOUND, not a terminal FAILED -- same reasoning as
+        # _sync_wanted_item's all-failed branch (services/downloads.py):
+        # this specific peer's enqueue call failed, which says nothing
+        # about a different peer's copy. The FAILED DownloadRecords just
+        # written above are exactly what process_wanted_item's
+        # failed_usernames check reads on the next retry to skip this
+        # peer rather than re-picking them again.
+        item.status = WantedStatus.NOT_FOUND
+        item.last_error = f"download failed to start ({exc}) -- will retry with a different source"
         session.add(item)
         session.commit()
 

@@ -334,10 +334,21 @@ def _sync_wanted_item(session: Session, record: DownloadRecord) -> None:
         # as a permanently-green row.
         session.delete(wanted)
     else:
-        wanted.status = WantedStatus.FAILED
+        # Back to NOT_FOUND, not a terminal FAILED -- the transfer that was
+        # tried failed (the peer rejected it, went offline mid-transfer,
+        # whatever slskd itself gave up on), which says nothing about
+        # whether a *different* peer's copy would work. process_all_wanted
+        # already retries NOT_FOUND on every periodic scan, and
+        # process_wanted_item now excludes any username with a FAILED
+        # DownloadRecord under this item from being re-picked, so a retry
+        # actually tries a different source instead of re-enqueueing the
+        # exact same doomed transfer.
         failed = [s for s in siblings if s.status == DownloadStatus.FAILED]
+        wanted.status = WantedStatus.NOT_FOUND
         wanted.last_error = (
-            failed[-1].error if len(failed) == 1 else f"all {len(failed)} tracks failed to download"
+            f"download failed ({failed[-1].error}) -- will retry with a different source"
+            if len(failed) == 1
+            else f"all {len(failed)} tracks failed to download -- will retry with different sources"
         )
         session.add(wanted)
     session.commit()

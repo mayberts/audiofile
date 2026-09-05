@@ -43,6 +43,7 @@ from ..services.plex_gaps import (
     get_missing_tracks_for_album,
     refresh_album_gap,
     undismiss_track,
+    upsert_gap_row,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,7 +188,9 @@ def get_album_track_check(rating_key: str, release_mbid: str | None = None, sess
     try:
         plex = get_plex_server(settings)
         dismissed = get_dismissed_normalized(session, rating_key)
-        return get_missing_tracks_for_album(plex, mb, rating_key, release_mbid, dismissed)
+        result = get_missing_tracks_for_album(plex, mb, rating_key, release_mbid, dismissed)
+        _sync_gap_row_from_check(session, rating_key, result)
+        return result
     except PlexNotConfigured as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:
@@ -287,6 +290,29 @@ def _refresh_gap_for_row(session: Session, row: LibraryAlbum) -> None:
         logger.exception("could not refresh track-gap row for album %s after pin change", row.rating_key)
     finally:
         mb.close()
+
+
+def _sync_gap_row_from_check(session: Session, rating_key: str, result: dict) -> None:
+    """Keeps the persisted AlbumTrackGap snapshot (Library page badges,
+    artist page badges, Missing Tracks page) in sync with *every* live
+    track-check here, not just a pin/unpin -- without this, an album a
+    full scan once flagged as missing (a wrong auto-matched release, a
+    matching-logic fix that landed after that scan ran, whatever) stayed
+    flagged everywhere else forever, even after checking it here already
+    showed it complete, since nothing else ever re-touched that row short
+    of a brand new full-library scan. Reuses the exact same upsert/delete
+    logic the full scan and refresh_album_gap use, so all three paths
+    can never disagree about what counts as "has a gap." Best-effort:
+    this is a side-effect of a read endpoint, so a failure here logs
+    rather than turning the live check itself into an error response."""
+    row = session.exec(select(LibraryAlbum).where(LibraryAlbum.rating_key == rating_key)).first()
+    if row is None:
+        return
+    try:
+        upsert_gap_row(session, rating_key, row.artist, row.album, row.thumb, result)
+        session.commit()
+    except Exception:
+        logger.exception("could not sync track-gap row for album %s after a live check", rating_key)
 
 
 @router.get("/item/{rating_key}/posters", response_model=list[PosterOut])

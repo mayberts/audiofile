@@ -462,7 +462,7 @@ def _scan_cancel_requested(engine, scan_id: int) -> bool:
         return bool(scan and scan.cancel_requested)
 
 
-def _upsert_gap_row(
+def upsert_gap_row(
     session: Session,
     rating_key: str,
     artist: str,
@@ -543,7 +543,7 @@ def refresh_album_gap(
             album_title,
         )
         return
-    _upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
+    upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
     session.commit()
 
 
@@ -566,7 +566,7 @@ def _persist_gap_result(
     a plain "scan.checked_albums += 1; commit()" would lose updates under
     real concurrency (two workers both reading the same starting value)."""
     with Session(engine) as session:
-        _upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
+        upsert_gap_row(session, rating_key, artist, album_title, thumb, result)
         session.exec(
             update(TrackGapScan)
             .where(TrackGapScan.id == scan_id)

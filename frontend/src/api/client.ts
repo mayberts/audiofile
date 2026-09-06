@@ -186,6 +186,7 @@ export interface SettingsOut {
   download_dir: string;
   library_dir: string;
   wanted_scan_interval_minutes: number;
+  missing_tracks_scan_interval_minutes: number;
   preferred_formats: string;
   min_bitrate_kbps: number;
 }

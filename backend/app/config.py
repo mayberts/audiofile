@@ -47,6 +47,12 @@ class Defaults(BaseSettings):
 
     wanted_scan_interval_minutes: int = 30
     download_poll_interval_seconds: int = 15
+    # 0 = disabled -- unlike the wanted-list scan (cheap, fast, safe to run
+    # every 30 minutes by default), a full library-wide missing-tracks scan
+    # means a MusicBrainz round-trip per album (thousands, on a large
+    # library) and isn't something to start running on a timer without the
+    # user opting in.
+    missing_tracks_scan_interval_minutes: int = 0
 
     preferred_formats: str = "flac,mp3"
     min_bitrate_kbps: int = 192
@@ -68,6 +74,7 @@ class Settings(BaseModel):
     database_url: str
     wanted_scan_interval_minutes: int
     download_poll_interval_seconds: int
+    missing_tracks_scan_interval_minutes: int
     preferred_formats: str
     min_bitrate_kbps: int
 

@@ -261,5 +261,6 @@ class SettingsUpdate(BaseModel):
     download_dir: Optional[str] = None
     library_dir: Optional[str] = None
     wanted_scan_interval_minutes: Optional[int] = None
+    missing_tracks_scan_interval_minutes: Optional[int] = None
     preferred_formats: Optional[str] = None
     min_bitrate_kbps: Optional[int] = None

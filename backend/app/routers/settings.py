@@ -6,7 +6,7 @@ from ..clients.plex import PlexNotConfigured, connect_plex
 from ..clients.slskd import SlskdClient, SlskdError
 from ..config import get_settings, update_settings
 from ..schemas import ConnectionTestResult, SettingsUpdate, TestPlexRequest, TestSlskdRequest
-from ..scheduler import reschedule_wanted_scan
+from ..scheduler import reschedule_missing_tracks_scan, reschedule_wanted_scan
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -22,6 +22,8 @@ def write_settings(payload: SettingsUpdate):
     settings = update_settings(patch)
     if "wanted_scan_interval_minutes" in patch:
         reschedule_wanted_scan(settings.wanted_scan_interval_minutes)
+    if "missing_tracks_scan_interval_minutes" in patch:
+        reschedule_missing_tracks_scan(settings.missing_tracks_scan_interval_minutes)
     return settings.masked()
 
 

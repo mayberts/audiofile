@@ -10,9 +10,10 @@ from .clients.plex import PlexNotConfigured, get_plex_server, refresh_music_libr
 from .clients.slskd import SlskdClient
 from .config import get_settings
 from .database import engine
-from .models import DownloadRecord, DownloadStatus
+from .models import DownloadRecord, DownloadStatus, TrackGapScan, TrackGapScanStatus
 from .services import downloads as downloads_service
 from .services import wanted as wanted_service
+from .services.plex_gaps import run_track_gap_scan
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,27 @@ def process_wanted_job() -> None:
         mb.close()
 
 
+def missing_tracks_scan_job() -> None:
+    with Session(engine) as session:
+        # A manual scan (or a previous tick, on a library big enough that
+        # one scan can outlast the interval) might already be running --
+        # skip starting a second, overlapping one rather than racing it.
+        current = session.exec(
+            select(TrackGapScan).where(TrackGapScan.status == TrackGapScanStatus.RUNNING)
+        ).first()
+        if current:
+            return
+        scan = TrackGapScan(status=TrackGapScanStatus.RUNNING)
+        session.add(scan)
+        session.commit()
+        session.refresh(scan)
+        scan_id = scan.id
+    try:
+        run_track_gap_scan(scan_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("missing_tracks_scan_job failed")
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -106,6 +128,15 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+    if settings.missing_tracks_scan_interval_minutes > 0:
+        scheduler.add_job(
+            missing_tracks_scan_job,
+            "interval",
+            minutes=settings.missing_tracks_scan_interval_minutes,
+            id="missing_tracks_scan",
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.start()
     _scheduler = scheduler
     return scheduler
@@ -126,3 +157,29 @@ def reschedule_wanted_scan(minutes: int) -> None:
     wanted_scan_interval_minutes so it takes effect immediately."""
     if _scheduler is not None:
         _scheduler.reschedule_job("process_wanted", trigger="interval", minutes=minutes)
+
+
+def reschedule_missing_tracks_scan(minutes: int) -> None:
+    """Same "takes effect immediately" reasoning as reschedule_wanted_scan,
+    but this job is also conditionally registered in the first place (0 =
+    disabled, see Defaults.missing_tracks_scan_interval_minutes) rather
+    than always present at a fixed interval -- so this adds or removes the
+    job outright on top of just changing its interval."""
+    if _scheduler is None:
+        return
+    existing = _scheduler.get_job("missing_tracks_scan")
+    if minutes <= 0:
+        if existing:
+            _scheduler.remove_job("missing_tracks_scan")
+        return
+    if existing:
+        _scheduler.reschedule_job("missing_tracks_scan", trigger="interval", minutes=minutes)
+    else:
+        _scheduler.add_job(
+            missing_tracks_scan_job,
+            "interval",
+            minutes=minutes,
+            id="missing_tracks_scan",
+            max_instances=1,
+            coalesce=True,
+        )

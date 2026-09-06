@@ -240,6 +240,20 @@ export default function SettingsPage() {
             onChange={(e) => field("wanted_scan_interval_minutes", e.target.value)}
           />
         </div>
+        <div className="field">
+          <label>Missing tracks auto-scan interval (minutes)</label>
+          <input
+            type="number"
+            value={val("missing_tracks_scan_interval_minutes")}
+            onChange={(e) => field("missing_tracks_scan_interval_minutes", e.target.value)}
+          />
+          <span className="muted">
+            Automatically re-runs the full library-wide missing-tracks scan on this schedule, same as
+            clicking "Scan for Missing Tracks" on that page — keeps its results from going stale between
+            visits. Set to 0 to disable (default): it's a MusicBrainz round-trip per album, so a large
+            library can take a while.
+          </span>
+        </div>
       </div>
 
       <button onClick={onSave} disabled={saving}>

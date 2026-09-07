@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, LibraryAlbumOut, MissingTrackOut, ReleaseEditionOut, TrackCheckOut, TrackOut } from "../api/client";
 import ArtworkPicker from "../components/ArtworkPicker";
 import ReleaseSearchPicker from "../components/ReleaseSearchPicker";
@@ -27,6 +27,8 @@ function folderOf(filePath: string): string {
 
 export default function AlbumDetailPage() {
   const { artist: artistName = "", album: albumName = "" } = useParams<{ artist: string; album: string }>();
+  const [searchParams] = useSearchParams();
+  const ratingKeyParam = searchParams.get("rk");
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
   const [tracks, setTracks] = useState<TrackOut[] | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
@@ -47,10 +49,21 @@ export default function AlbumDetailPage() {
     }
   }, []);
 
-  const albumEntry = useMemo(
-    () => (albums || []).find((a) => a.artist === artistName && a.album === albumName) ?? null,
-    [albums, artistName, albumName],
-  );
+  // The same artist+title can legitimately appear more than once (a
+  // library duplicate, a same-named release from a different year) --
+  // artist+album text alone can't tell those apart, so a rating_key
+  // carried in the URL (see the ?rk= links from ArtistDetailPage/
+  // MissingTracksPage) is the real identity and always wins when present.
+  // Falls back to the old artist+album match for a link that predates
+  // this (or was typed/bookmarked by hand) rather than showing nothing.
+  const albumEntry = useMemo(() => {
+    const list = albums || [];
+    if (ratingKeyParam) {
+      const byKey = list.find((a) => a.rating_key === ratingKeyParam);
+      if (byKey) return byKey;
+    }
+    return list.find((a) => a.artist === artistName && a.album === albumName) ?? null;
+  }, [albums, artistName, albumName, ratingKeyParam]);
 
   const [thumbOverride, setThumbOverride] = useState<string | null>(null);
   const [showArtworkPicker, setShowArtworkPicker] = useState(false);

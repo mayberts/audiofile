@@ -299,7 +299,7 @@ function GapRow({
     <div style={{ borderTop: "1px solid var(--border)" }}>
       <div className="row" style={{ padding: "0.5rem 1rem", gap: "0.8rem" }}>
         <Link
-          to={`/library/${encodeURIComponent(g.artist)}/${encodeURIComponent(g.album)}`}
+          to={`/library/${encodeURIComponent(g.artist)}/${encodeURIComponent(g.album)}?rk=${encodeURIComponent(g.rating_key)}`}
           className="row"
           style={{ flex: 1, minWidth: 0, gap: "0.8rem", color: "inherit", textDecoration: "none" }}
         >

@@ -389,7 +389,10 @@ function ArtistAlbumRow({
   if (row.kind === "owned") {
     return (
       <Link
-        to={`/library/${encodeURIComponent(row.owned.artist)}/${encodeURIComponent(row.owned.album)}`}
+        to={
+          `/library/${encodeURIComponent(row.owned.artist)}/${encodeURIComponent(row.owned.album)}` +
+          (row.owned.rating_key ? `?rk=${encodeURIComponent(row.owned.rating_key)}` : "")
+        }
         style={{ color: "inherit", textDecoration: "none", display: "block" }}
       >
         {inner}

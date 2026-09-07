@@ -4,6 +4,7 @@ import json
 import logging
 import re
 
+from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select, update
 
 from ..clients.musicbrainz import MusicBrainzClient
@@ -95,6 +96,39 @@ def _query_ladder(item: WantedItem, year: str | None) -> list[str]:
         if not deduped or deduped[-1] != q:
             deduped.append(q)
     return deduped
+
+
+def _commit_item_update(session: Session, item: WantedItem) -> bool:
+    """Commits a pending status/error change on a wanted item, tolerating
+    the row having been deleted out from under this scan while it was still
+    in flight -- a real search can take several minutes (see
+    _FIRST_RUNG_TIMEOUT_MS), and nothing stops someone from clicking Remove
+    on the item in the meantime. SQLAlchemy's ORM UPDATE is keyed on primary
+    key alone, so a deleted row surfaces as StaleDataError ("expected to
+    update 1 row(s); 0 were matched") rather than silently no-op'ing --
+    confirmed against a real crash where exactly this happened mid-scan and
+    took the whole background task down with it, discarding the real
+    matches that scan had just found instead of enqueueing them. Returns
+    False (after rolling back) when that happened, so the caller can
+    abandon this attempt cleanly instead of crashing."""
+    item_id = item.id  # read before commit -- a rollback below expires this instance
+    session.add(item)
+    try:
+        session.commit()
+        return True
+    except StaleDataError:
+        # A rollback expires every object touched by this session, and the
+        # item's row is really gone -- accessing any of its attributes
+        # after this point (even just to log item.id) re-triggers a load
+        # against a row that no longer exists, raising ObjectDeletedError
+        # right out of this except block. item_id above sidesteps that.
+        session.rollback()
+        logger.info(
+            "wanted item %s was removed while a scan was still in flight for it -- abandoning "
+            "this attempt instead of enqueueing a download nobody asked for anymore",
+            item_id,
+        )
+        return False
 
 
 def process_wanted_item(
@@ -226,8 +260,7 @@ def process_wanted_item(
                 logger.warning("search failed for wanted item %s (query %r): %s", item.id, query, exc)
                 item.status = WantedStatus.FAILED
                 item.last_error = str(exc)
-                session.add(item)
-                session.commit()
+                _commit_item_update(session, item)
                 return
 
             results = search_service.parse_search_responses(raw)
@@ -278,8 +311,7 @@ def process_wanted_item(
             logger.warning("search failed for wanted item %s: %s", item.id, exc)
             item.status = WantedStatus.FAILED
             item.last_error = str(exc)
-            session.add(item)
-            session.commit()
+            _commit_item_update(session, item)
             return
         results = search_service.parse_search_responses(raw)
         if failed_usernames:
@@ -331,8 +363,7 @@ def process_wanted_item(
             )
         else:
             item.last_error = "no matching files found on Soulseek"
-        session.add(item)
-        session.commit()
+        _commit_item_update(session, item)
         return
 
     _enqueue_matches(session, item, matches, slskd)
@@ -381,8 +412,8 @@ def _pool_review_candidates(
         )
     item.status = WantedStatus.AWAITING_REVIEW
     item.last_error = None
-    session.add(item)
-    session.commit()
+    if not _commit_item_update(session, item):
+        return
     logger.info("wanted item %s: %d candidate(s) pooled for manual review", item.id, len(pooled))
 
 
@@ -431,8 +462,18 @@ def _enqueue_matches(
 
     item.status = WantedStatus.DOWNLOADING
     item.last_error = None
-    session.add(item)
-    session.commit()
+    # A real search can take several minutes (see _FIRST_RUNG_TIMEOUT_MS),
+    # and nothing stops someone from clicking Remove on this item in the
+    # meantime -- confirmed against a real crash where exactly that
+    # happened: this commit hit StaleDataError ("expected to update 1
+    # row(s); 0 were matched") because the row was already gone, which took
+    # the whole background task down with it and discarded the
+    # DownloadRecords just added above (same transaction, rolled back on
+    # the failed commit) without ever calling slskd. If that's happened,
+    # there's no wanted item left to download this for -- abandon the
+    # attempt instead of enqueueing a transfer nobody asked for anymore.
+    if not _commit_item_update(session, item):
+        return
 
     try:
         slskd.enqueue_download(username, [{"filename": m.filename, "size": m.size} for m in matches])
@@ -450,8 +491,7 @@ def _enqueue_matches(
         # peer rather than re-picking them again.
         item.status = WantedStatus.NOT_FOUND
         item.last_error = f"download failed to start ({exc}) -- will retry with a different source"
-        session.add(item)
-        session.commit()
+        _commit_item_update(session, item)
 
 
 def process_all_wanted(session: Session, slskd: SlskdClient, settings: Settings, mb: MusicBrainzClient) -> int:

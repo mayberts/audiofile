@@ -368,11 +368,22 @@ class MusicBrainzClient:
         # `status` only filters inc=releases — release-groups have no status
         # field (that's a per-release property) — so it can't be passed here;
         # doing so makes MusicBrainz reject the whole request with a 400.
+        #
+        # `type` accepts a pipe-separated list on browse requests -- asking
+        # for both keeps EPs in the discography comparison (previously
+        # "album" alone silently meant an EP could never be flagged as
+        # missing, or offered as a pick in the artist discography picker,
+        # even though the exact same artist's *owned* EPs already show up
+        # fine elsewhere since nothing filters what's already in Plex).
+        # Also re-checked against _PREFERRED_PRIMARY_TYPES below rather than
+        # trusting the server-side filter alone, the same defense-in-depth
+        # this module already applies when picking a release edition.
         data = self._get(
             f"/artist/{artist_mbid}",
-            {"inc": "release-groups", "type": "album"},
+            {"inc": "release-groups", "type": "album|ep"},
         )
-        return data.get("release-groups", [])
+        release_groups = data.get("release-groups", [])
+        return [rg for rg in release_groups if rg.get("primary-type") in _PREFERRED_PRIMARY_TYPES]
 
     def search_artist(self, name: str) -> Optional[dict]:
         data = self._get("/artist", {"query": f'artist:"{_escape_lucene(name)}"', "limit": 5})

@@ -297,7 +297,7 @@ def get_owned_album_titles_from_snapshot(session: Session, artist_name: str) -> 
 def get_artist_discography(
     mb: MusicBrainzClient, artist_name: str, owned_normalized: set[str] | None = None
 ) -> list[dict]:
-    """Every studio album MusicBrainz lists for this artist name, most
+    """Every studio album or EP MusicBrainz lists for this artist name, most
     recent first. Doesn't touch Plex at all, so it works for an artist you
     don't own anything by yet — used to let someone pick specific albums to
     want instead of adding one ambiguous "whole discography" entry.
@@ -326,9 +326,9 @@ def get_artist_discography(
 
 
 def get_missing_albums_for_artist(plex: PlexServer, mb: MusicBrainzClient, artist_rating_key: str) -> list[dict]:
-    """Studio albums MusicBrainz lists for this artist that aren't already
-    in the Plex library — checked live, just for this one artist (two
-    MusicBrainz requests), not a whole-library background scan."""
+    """Studio albums/EPs MusicBrainz lists for this artist that aren't
+    already in the Plex library — checked live, just for this one artist
+    (two MusicBrainz requests), not a whole-library background scan."""
     artist = get_artist_item(plex, artist_rating_key)
     owned_normalized = {_normalize_title(t) for t in get_artist_album_titles(artist)}
     discography = get_artist_discography(mb, artist.title, owned_normalized)

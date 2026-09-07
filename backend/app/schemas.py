@@ -138,6 +138,7 @@ class TrackOut(BaseModel):
     title: str
     track_number: Optional[int] = None
     duration_ms: Optional[int] = None
+    file_path: Optional[str] = None
 
 
 class MissingAlbumOut(BaseModel):

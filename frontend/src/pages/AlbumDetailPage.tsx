@@ -13,6 +13,18 @@ function formatDuration(ms: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+// Plex reports whichever path separator its own OS uses -- a track's own
+// folder is just that path with the filename dropped, so a track split
+// across a differently-named folder (a stray duplicate, a multi-disc
+// album someone organized by hand) still shows its own real location
+// instead of a guessed common one.
+function folderOf(filePath: string): string {
+  const sep = filePath.includes("\\") && !filePath.includes("/") ? "\\" : "/";
+  const parts = filePath.split(sep);
+  parts.pop();
+  return parts.join(sep);
+}
+
 export default function AlbumDetailPage() {
   const { artist: artistName = "", album: albumName = "" } = useParams<{ artist: string; album: string }>();
   const [albums, setAlbums] = useState<LibraryAlbumOut[] | null>(libraryStore.albums);
@@ -64,6 +76,17 @@ export default function AlbumDetailPage() {
       .finally(() => setLoadingTracks(false));
   }, [albumEntry?.rating_key]);
 
+  // Most albums live in one folder -- showing that once up top answers
+  // "where is this" without repeating the same long path on every row.
+  // Falls back to null (nothing shown) rather than guessing when tracks
+  // disagree on their folder or Plex hasn't reported a path at all.
+  const albumFolder = useMemo(() => {
+    const paths = (tracks || []).map((t) => t.file_path).filter((p): p is string => !!p);
+    if (paths.length === 0) return null;
+    const folders = new Set(paths.map(folderOf));
+    return folders.size === 1 ? paths[0] && folderOf(paths[0]) : null;
+  }, [tracks]);
+
   return (
     <div>
       <p style={{ marginBottom: "0.8rem" }}>
@@ -113,6 +136,15 @@ export default function AlbumDetailPage() {
               {albumEntry?.year ? ` · ${albumEntry.year}` : ""}
               {albumEntry?.track_count ? ` · ${albumEntry.track_count} tracks` : ""}
             </p>
+            {albumFolder && (
+              <p
+                className="detail-hero-meta muted"
+                style={{ fontFamily: "monospace", fontSize: "0.8rem", wordBreak: "break-all" }}
+                title={albumFolder}
+              >
+                {albumFolder}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -139,13 +171,31 @@ export default function AlbumDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {tracks.map((t, i) => (
-                <tr key={i}>
-                  <td className="muted">{t.track_number ?? i + 1}</td>
-                  <td>{t.title}</td>
-                  <td className="muted">{formatDuration(t.duration_ms)}</td>
-                </tr>
-              ))}
+              {tracks.map((t, i) => {
+                // Only called out per-track when it disagrees with the
+                // one folder path already shown up top -- otherwise this
+                // would just repeat the same long path on every row.
+                const trackFolder = t.file_path ? folderOf(t.file_path) : null;
+                const showTrackPath = t.file_path && (!albumFolder || trackFolder !== albumFolder);
+                return (
+                  <tr key={i}>
+                    <td className="muted">{t.track_number ?? i + 1}</td>
+                    <td>
+                      {t.title}
+                      {showTrackPath && (
+                        <div
+                          className="muted"
+                          style={{ fontFamily: "monospace", fontSize: "0.75rem", marginTop: "0.15rem", wordBreak: "break-all" }}
+                          title={t.file_path ?? undefined}
+                        >
+                          {t.file_path}
+                        </div>
+                      )}
+                    </td>
+                    <td className="muted">{formatDuration(t.duration_ms)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

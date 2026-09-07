@@ -150,11 +150,19 @@ def get_album_tracks(plex: PlexServer, rating_key: str) -> list[dict]:
     album = plex.fetchItem(int(rating_key))
     tracks = []
     for track in album.tracks():
+        # locations is plexapi's own flattening of media/part file paths --
+        # a path Plex's own server sees, so it lines up with what "Manage
+        # Library Files" shows there. Only differs from what's actually on
+        # disk inside *this* container when library_dir isn't mounted at
+        # the same path Plex itself uses, same caveat as anywhere else this
+        # app assumes the two agree.
+        locations = track.locations
         tracks.append(
             {
                 "title": track.title,
                 "track_number": track.index,
                 "duration_ms": track.duration,
+                "file_path": locations[0] if locations else None,
             }
         )
     return tracks

@@ -102,6 +102,7 @@ export interface TrackOut {
   title: string;
   track_number: number | null;
   duration_ms: number | null;
+  file_path: string | null;
 }
 
 export interface MissingAlbumOut {

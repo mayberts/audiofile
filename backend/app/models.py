@@ -39,6 +39,20 @@ def compute_wanted_dedup_key(artist: str, album: Optional[str], track: Optional[
 
 
 class WantedItem(SQLModel, table=True):
+    # Plain SQLite INTEGER PRIMARY KEY reuses a freed rowid for the next
+    # insert once the highest-numbered row is deleted -- and a successful
+    # download deletes its WantedItem while deliberately leaving its
+    # DownloadRecords behind as history (see _sync_wanted_item). Without
+    # this, a brand new, completely unrelated want added afterwards can be
+    # handed that exact same id, making it look -- to anything that looks
+    # up DownloadRecords by wanted_item_id (reconcile_stuck_wanted_items,
+    # in particular) -- like it already has a finished download and
+    # silently deleting the new item out from under an in-flight scan.
+    # sqlite_autoincrement guarantees SQLite never reuses a rowid, closing
+    # this off for good. See database.py's _ensure_wanted_item_autoincrement
+    # for the one-time migration this requires on an existing database.
+    __table_args__ = {"sqlite_autoincrement": True}
+
     id: Optional[int] = Field(default=None, primary_key=True)
     artist: str
     album: Optional[str] = None

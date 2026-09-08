@@ -33,9 +33,99 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register models on metadata)
 
     SQLModel.metadata.create_all(engine)
+    # Order matters: _add_missing_columns adds any columns an existing
+    # wanteditem table is still missing (dedup_key in particular) and
+    # backfills/deduplicates them on that table before anything else
+    # touches it. _ensure_wanted_item_autoincrement then recreates the
+    # table fresh -- copying it only after it's already complete means
+    # the copy carries real, already-deduplicated data across instead of
+    # a freshly-added, still-empty dedup_key column with nothing to copy
+    # from the old table (which used to skip the backfill entirely, since
+    # by the time _add_missing_columns ran, the recreated table already
+    # "had" the column).
     _add_missing_columns()
+    _ensure_wanted_item_autoincrement()
     _recover_interrupted_scans()
     _recover_interrupted_wanted_scans()
+
+
+def _ensure_wanted_item_autoincrement() -> None:
+    """One-time migration for a database created before WantedItem declared
+    sqlite_autoincrement=True (see models.py for why that matters -- a
+    reused id lets a brand new want inherit a deleted one's leftover
+    DownloadRecords, which silently deletes it mid-scan). create_all()
+    above already gives a fresh install the AUTOINCREMENT table directly
+    from the current model, so this only has real work to do on an
+    existing database whose wanteditem table predates that.
+
+    SQLite has no ALTER TABLE for adding AUTOINCREMENT to an existing
+    table, so this recreates it: rename the old table aside, let
+    WantedItem.__table__.create() build the new one (guaranteed to match
+    the live model, unlike hand-written DDL), copy every row across by
+    whichever columns the old table actually had, then drop the old one.
+    Runs after _add_missing_columns (not before) specifically so the copy
+    carries real, already-backfilled/deduplicated data -- copying first
+    would leave a freshly-added dedup_key column with nothing to copy from
+    the old table, and _add_missing_columns would then see the column as
+    already present on its next check and skip backfilling it entirely."""
+    if not _settings.database_url.startswith("sqlite"):
+        return
+    from .models import WantedItem
+
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='wanteditem'"
+        ).fetchone()
+        if row is None or (row[0] and "AUTOINCREMENT" in row[0]):
+            return  # no table yet (nothing to migrate), or already migrated
+
+        conn.exec_driver_sql("ALTER TABLE wanteditem RENAME TO wanteditem_old")
+        WantedItem.__table__.create(conn)
+
+        # A handful of columns are NOT NULL on the model but only get their
+        # default applied by the ORM at insert time, never as a real
+        # database-level DEFAULT -- so a database old enough to predate
+        # this fix can have rows (or, for a genuinely ancient table, not
+        # even have the column at all) where a plain column-to-column copy
+        # would try to insert NULL and fail outright, taking the whole
+        # startup down with it. Every column is included explicitly rather
+        # than letting SQLite fall back on its own per-column default: one
+        # missing from the old table entirely is substituted with its
+        # literal fallback (or NULL, for one that's genuinely optional);
+        # one that exists but happens to be NULL on some row is COALESCEd
+        # the same way.
+        literal_defaults = {
+            "status": "'WANTED'",
+            "source": "'MANUAL'",
+            "created_at": "CURRENT_TIMESTAMP",
+            "updated_at": "CURRENT_TIMESTAMP",
+        }
+        old_columns = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(wanteditem_old)")}
+        all_columns = list(WantedItem.__table__.columns.keys())
+
+        def select_expr(c: str) -> str:
+            if c not in old_columns:
+                # The column didn't exist in the old table at all -- there's
+                # nothing to reference, so use the literal fallback (or NULL
+                # for a genuinely optional one) unconditionally.
+                return literal_defaults.get(c, "NULL")
+            if c in literal_defaults:
+                return f"COALESCE({c}, {literal_defaults[c]})"
+            return c
+
+        dest_list = ", ".join(all_columns)
+        select_list = ", ".join(select_expr(c) for c in all_columns)
+        conn.exec_driver_sql(f"INSERT INTO wanteditem ({dest_list}) SELECT {select_list} FROM wanteditem_old")
+        conn.exec_driver_sql("DROP TABLE wanteditem_old")
+        # The dedup_key UNIQUE index lived on the now-dropped old table --
+        # recreate it here too rather than relying on WantedItem.__table__
+        # .create() alone to have produced an equivalent one, so this
+        # can't regress into allowing duplicate wants again just because
+        # this migration happened to run.
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_wanteditem_dedup_key ON wanteditem (dedup_key)"
+        )
+        conn.commit()
 
 
 def _recover_interrupted_wanted_scans() -> None:
